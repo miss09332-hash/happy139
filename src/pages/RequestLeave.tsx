@@ -46,6 +46,24 @@ export default function RequestLeave() {
       if (error) throw error;
       toast.success("休假申請已提交");
       setForm({ leaveType: "", startDate: "", endDate: "", reason: "" });
+
+      // Notify admin via LINE
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("name, department")
+        .eq("user_id", user!.id)
+        .maybeSingle();
+      supabase.functions.invoke("send-line-message", {
+        body: {
+          mode: "new-request",
+          employeeName: profile?.name || "未知",
+          department: profile?.department || "",
+          leaveType: form.leaveType,
+          startDate: form.startDate,
+          endDate: form.endDate,
+          reason: form.reason,
+        },
+      }).catch(() => {}); // fire-and-forget
     } catch (err: any) {
       toast.error("提交失敗", { description: err.message });
     } finally {

@@ -263,6 +263,130 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // === New Request Notification ===
+    if (mode === "new-request") {
+      const { employeeName, department, leaveType, startDate, endDate, reason } = body;
+      const dateText = startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
+      const bubble = {
+        type: "bubble",
+        header: {
+          type: "box", layout: "vertical",
+          contents: [
+            { type: "text", text: "📨 新休假申請", size: "xl", color: "#FFFFFF", weight: "bold" },
+            { type: "text", text: "有員工提交了休假申請", size: "xs", color: "#FFFFFFCC", margin: "xs" },
+          ],
+          backgroundColor: "#F59E0B",
+          paddingAll: "lg",
+        },
+        body: {
+          type: "box", layout: "vertical", paddingAll: "lg",
+          contents: [
+            { type: "box", layout: "horizontal", margin: "md", contents: [
+              { type: "text", text: "員工", size: "sm", color: "#AAAAAA", flex: 2 },
+              { type: "text", text: `${employeeName}${department ? ` (${department})` : ""}`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+            ]},
+            { type: "separator", margin: "md", color: "#F0F0F0" },
+            { type: "box", layout: "horizontal", margin: "md", contents: [
+              { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
+              { type: "text", text: leaveType, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+            ]},
+            { type: "separator", margin: "md", color: "#F0F0F0" },
+            { type: "box", layout: "horizontal", margin: "md", contents: [
+              { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
+              { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+            ]},
+            ...(reason ? [
+              { type: "separator", margin: "md", color: "#F0F0F0" },
+              { type: "box", layout: "horizontal", margin: "md", contents: [
+                { type: "text", text: "原因", size: "sm", color: "#AAAAAA", flex: 2 },
+                { type: "text", text: reason, size: "sm", color: "#333333", flex: 5, wrap: true },
+              ]},
+            ] : []),
+          ],
+        },
+        footer: {
+          type: "box", layout: "vertical",
+          contents: [{ type: "text", text: "⏳ 請前往後台審核", size: "xs", color: "#F59E0B", align: "center" }],
+          paddingAll: "md", backgroundColor: "#FFFBEB",
+        },
+      };
+
+      const response = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+        body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText: `新休假申請：${employeeName} - ${leaveType}`, contents: bubble }] }),
+      });
+      if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // === Monthly Summary ===
+    if (mode === "monthly-summary") {
+      const now = new Date();
+      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const monthEnd = lastDay.toISOString().split("T")[0];
+      const monthLabel = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+      const { data: leaves } = await supabase
+        .from("leave_requests")
+        .select("leave_type, start_date, end_date")
+        .eq("status", "approved")
+        .lte("start_date", monthEnd)
+        .gte("end_date", monthStart);
+
+      const stats = new Map<string, { count: number; days: number }>();
+      for (const l of leaves ?? []) {
+        const days = Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1;
+        const prev = stats.get(l.leave_type) ?? { count: 0, days: 0 };
+        stats.set(l.leave_type, { count: prev.count + 1, days: prev.days + days });
+      }
+
+      const rows: object[] = [];
+      for (const [type, s] of stats) {
+        rows.push({
+          type: "box", layout: "horizontal", margin: "lg",
+          contents: [
+            { type: "box", layout: "vertical", flex: 0, width: "8px", height: "8px", cornerRadius: "4px", backgroundColor: getLeaveTypeColor(type), margin: "sm" },
+            { type: "text", text: type, size: "sm", color: "#333333", flex: 3, margin: "md" },
+            { type: "text", text: `${s.count} 人次`, size: "sm", color: "#666666", flex: 2, align: "end" },
+            { type: "text", text: `${s.days} 天`, size: "sm", color: "#333333", weight: "bold", flex: 2, align: "end" },
+          ],
+          alignItems: "center",
+        });
+      }
+      if (rows.length === 0) {
+        rows.push({ type: "text", text: "🎉 本月無休假紀錄", size: "md", color: "#4CAF50", align: "center", margin: "xl" });
+      }
+
+      const bubble = {
+        type: "bubble", size: "mega",
+        header: {
+          type: "box", layout: "vertical",
+          contents: [
+            { type: "text", text: "📊 月統計報告", size: "xl", color: "#FFFFFF", weight: "bold" },
+            { type: "text", text: monthLabel, size: "xs", color: "#FFFFFFCC", margin: "xs" },
+          ],
+          backgroundColor: "#10B981", paddingAll: "lg",
+        },
+        body: { type: "box", layout: "vertical", contents: rows, paddingAll: "lg" },
+        footer: {
+          type: "box", layout: "vertical",
+          contents: [{ type: "text", text: `共 ${leaves?.length ?? 0} 筆休假`, size: "xs", color: "#AAAAAA", align: "end" }],
+          paddingAll: "md", backgroundColor: "#FAFAFA",
+        },
+        styles: { footer: { separator: true } },
+      };
+
+      const response = await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+        body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText: `${monthLabel} 月統計報告`, contents: bubble }] }),
+      });
+      if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     if (mode === "daily-summary" || mode === "weekly-summary") {
       let startDate: string, endDate: string, title: string, subtitle: string, emoji: string, accentColor: string;
 
@@ -284,7 +408,6 @@ serve(async (req) => {
         accentColor = "#8B5CF6";
       }
 
-      // Fetch approved leaves in range
       const { data: leaves, error: lErr } = await supabase
         .from("leave_requests")
         .select("*")
@@ -293,55 +416,27 @@ serve(async (req) => {
         .gte("end_date", startDate);
       if (lErr) throw lErr;
 
-      // Fetch profiles
       const userIds = [...new Set((leaves ?? []).map((l: any) => l.user_id))];
       let profileMap = new Map<string, any>();
       if (userIds.length > 0) {
-        const { data: profiles } = await supabase
-          .from("profiles")
-          .select("user_id, name, department")
-          .in("user_id", userIds);
+        const { data: profiles } = await supabase.from("profiles").select("user_id, name, department").in("user_id", userIds);
         profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p]));
       }
 
       const entries: LeaveEntry[] = (leaves ?? []).map((l: any) => {
         const p = profileMap.get(l.user_id);
-        return {
-          name: p?.name ?? "未知",
-          department: p?.department ?? "",
-          leaveType: l.leave_type,
-          startDate: l.start_date,
-          endDate: l.end_date,
-        };
+        return { name: p?.name ?? "未知", department: p?.department ?? "", leaveType: l.leave_type, startDate: l.start_date, endDate: l.end_date };
       });
 
-      // Pending count
-      const { count: pendingCount } = await supabase
-        .from("leave_requests")
-        .select("*", { count: "exact", head: true })
-        .eq("status", "pending");
-
+      const { count: pendingCount } = await supabase.from("leave_requests").select("*", { count: "exact", head: true }).eq("status", "pending");
       const bubble = buildFlexBubble(title, subtitle, emoji, accentColor, entries, pendingCount ?? 0);
-
-      const flexMessage = {
-        type: "flex",
-        altText: `${title}：共 ${entries.length} 人休假`,
-        contents: bubble,
-      };
 
       const response = await fetch("https://api.line.me/v2/bot/message/push", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${LINE_TOKEN}`,
-        },
-        body: JSON.stringify({ to: targetId, messages: [flexMessage] }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+        body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText: `${title}：共 ${entries.length} 人休假`, contents: bubble }] }),
       });
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        throw new Error(`LINE API error [${response.status}]: ${errorBody}`);
-      }
+      if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
 
       return new Response(
         JSON.stringify({ success: true, entries: entries.length }),
