@@ -1,88 +1,82 @@
 
 
-# 休假提醒增強 + 週/月報表 + LINE 綁定說明 + 自動/手動開關
+# 四項功能改善計畫
 
-## 問題 1：休假提醒要顯示休假天數
+## 1. 請假日期重疊檢查
 
-目前 `leave-balance-reminder` 發送的訊息只顯示已休天數和門檻/額度，但缺少「剩餘天數」資訊。
+**問題**：目前員工可以在同一天申請不同假別（如病假和特休同一天），邏輯上不合理。
 
-**修復**：在提醒訊息中加入每個假別的完整資訊：「已休 X 天 / 額度 Y 天 / 剩餘 Z 天」，並改用 Flex Message 格式（含進度條），讓員工一目了然。
+**解決方案**：
+- 在 `RequestLeave.tsx` 提交前，查詢該員工是否有已存在（pending 或 approved）的假單與新申請日期重疊
+- 在 `line-webhook` 的 LINE 申請流程中也加入同樣的檢查
+- 若重疊，顯示錯誤提示並阻止提交
 
----
-
-## 問題 2：本週提醒改為「包含當天的完整一週」+ 新增下週/當月
-
-目前 `getWeekDates()` 只取週一到週五。需改為：
-- **本週**：以點擊當天所在的週一到週日（7 天）為範圍
-- **新增「下週休假」模式**（`next-week-summary`）：下一個週一到週日
-- **新增「當月休假」模式**（`monthly-leave-list`）：當月 1 號到月底，列出所有休假人員明細
-
-### 修改項目
-- Edge Function `send-line-message`：修改 `getWeekDates` 改為週一~週日；新增 `next-week-summary` 和 `monthly-leave-list` 模式
-- `src/lib/line.ts`：新增 `sendNextWeekSummary()` 和 `sendMonthlyLeaveList()` 函數
-- `src/pages/NotificationSettings.tsx`：新增「下週休假」和「當月休假」手動發送按鈕
+**修改檔案**：
+- `src/pages/RequestLeave.tsx` — 新增日期重疊驗證邏輯
+- `supabase/functions/line-webhook/index.ts` — 在 `await_date` 步驟加入重疊檢查
 
 ---
 
-## 問題 3：員工如何在 LINE 上接獲通知
+## 2. LINE 圖文選單（Rich Menu）設定說明 + 連結跳轉
 
-**現有機制說明**（已實作但需向您說明）：
+**說明**：LINE 的「圖文選單」（Rich Menu）需要在 LINE Official Account Manager 後台設定，無法透過程式碼自動建立。但我們可以：
+- 在 LINE webhook 中加入快捷選單（Quick Reply）功能，讓員工每次互動時都能看到常用功能按鈕
+- 在 webhook 的預設回覆中加入「申請休假」按鈕，點擊後可透過 URI action 開啟網頁版請假頁面
 
-系統已內建 LINE 帳號綁定流程：
-1. 員工加入您的 LINE 官方帳號（Bot）
-2. 第一次傳送任何訊息時，系統會要求輸入公司 Email
-3. 系統比對 Email 後，將該員工的 `line_user_id` 寫入 `profiles` 表
-4. 綁定後，系統就能透過 LINE Push API 發送個人通知
-
-**改善**：在「休假餘額追蹤」頁面新增一欄「LINE 綁定狀態」，讓管理員可以看到哪些員工已綁定 LINE、哪些還沒綁定，方便提醒員工完成綁定。
+**修改檔案**：
+- `supabase/functions/line-webhook/index.ts` — 在預設回覆和功能選單中加入 Quick Reply 按鈕，包含跳轉至 Web 請假頁面的 URI action
 
 ---
 
-## 問題 4：自動/手動發送開關
+## 3. 休假提醒加入天數計算
 
-目前通知設定頁面（`NotificationSettings.tsx`）的開關只是前端 state，沒有持久化。
+**問題**：LINE 通知中的休假明細只顯示日期範圍，缺少「共計 X 天」。
 
-**修復**：
-- 新增資料庫表 `notification_settings` 儲存設定（每日提醒開關、每週提醒開關、每月提醒開關、休假餘額提醒開關、提醒時間等）
-- 通知設定頁面改為讀寫資料庫
-- 新增「休假餘額自動提醒」開關
-- 手動發送按鈕始終可用，不受自動開關影響
+**解決方案**：
+- 在 `send-line-message` 的 `buildFlexBubble` 函數中，為每筆休假計算天數並顯示
+- 格式改為：`事假 2026-02-21~2026-02-22 共計2天`
+- 同時影響每日提醒、本週提醒、下週提醒、當月明細
+
+**修改檔案**：
+- `supabase/functions/send-line-message/index.ts` — 修改 `LeaveEntry` 介面新增 `days` 欄位；修改 `buildFlexBubble` 顯示天數；修改 `fetchLeavesAndProfiles` 計算天數
+
+---
+
+## 4. 休假日曆改為週一開頭 + 假日紅字 + 國定假日
+
+**問題**：目前日曆以週日為第一天，且假日沒有特別標示，也沒有顯示國定假日。
+
+**解決方案**：
+- 將 `dayNames` 改為 `["一", "二", "三", "四", "五", "六", "日"]`（週一開頭）
+- 調整 `firstDay` 計算邏輯，將週日（0）轉換為 6，其餘減 1
+- 週六、週日的日期數字改為紅色
+- 新增台灣國定假日資料（含農曆換算後的固定日期），在日曆格子上顯示假日名稱標記
+- 國定假日的日期也顯示紅色
+
+**新增檔案**：
+- `src/lib/taiwanHolidays.ts` — 台灣國定假日資料（2024-2027），包含元旦、春節、清明、端午、中秋、國慶等
+
+**修改檔案**：
+- `src/pages/LeaveCalendar.tsx` — 調整日曆排列為週一開頭；加入假日紅字邏輯；加入國定假日顯示
 
 ---
 
 ## 技術細節
 
-### 資料庫變更
-
-新增 `notification_settings` 表：
-
-```text
-notification_settings
-- id (uuid, PK)
-- setting_key (text, unique) -- 如 'daily_reminder', 'weekly_reminder', 'monthly_reminder', 'balance_reminder'
-- enabled (boolean, default false)
-- schedule_time (text, default '08:00') -- 排程時間
-- updated_at (timestamptz)
-- updated_by (uuid)
-```
-
-RLS：管理員可讀寫，員工可讀。
-
-### 修改檔案
+### 修改檔案總覽
 
 | 檔案 | 變更 |
 |------|------|
-| `supabase/functions/send-line-message/index.ts` | 修改 `getWeekDates` 為週一~週日；新增 `next-week-summary`、`monthly-leave-list` 模式；改善 `leave-balance-reminder` 訊息格式含天數明細 |
-| `src/lib/line.ts` | 新增 `sendNextWeekSummary()`、`sendMonthlyLeaveList()` |
-| `src/pages/NotificationSettings.tsx` | 改為讀寫資料庫；新增下週/當月/餘額提醒按鈕和自動開關 |
-| `src/pages/LeaveBalance.tsx` | 新增 LINE 綁定狀態欄位 |
-| 資料庫遷移 | 新增 `notification_settings` 表 |
+| `src/pages/RequestLeave.tsx` | 新增日期重疊檢查 |
+| `supabase/functions/line-webhook/index.ts` | 加入重疊檢查 + Quick Reply 按鈕（含跳轉請假頁面） |
+| `supabase/functions/send-line-message/index.ts` | 休假明細加入天數顯示 |
+| `src/pages/LeaveCalendar.tsx` | 週一開頭 + 假日紅字 + 國定假日標示 |
+| `src/lib/taiwanHolidays.ts` | 新增台灣國定假日資料 |
 
 ### 實作順序
 
-1. 資料庫遷移（notification_settings 表）
-2. 修改 Edge Function（週日期範圍、新模式、提醒天數格式）
-3. 更新休假餘額頁面（LINE 綁定狀態欄）
-4. 重寫通知設定頁面（資料庫持久化 + 新按鈕）
-5. 更新 `line.ts` 新增函數
+1. 建立台灣國定假日資料檔
+2. 修改休假日曆（週一開頭 + 假日紅字 + 國定假日）
+3. 修改請假頁面加入日期重疊檢查
+4. 修改 Edge Functions（LINE 天數顯示 + 重疊檢查 + Quick Reply）
 
