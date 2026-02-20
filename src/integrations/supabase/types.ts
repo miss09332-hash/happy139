@@ -110,6 +110,33 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_settings: {
+        Row: {
+          enabled: boolean
+          id: string
+          schedule_time: string
+          setting_key: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          enabled?: boolean
+          id?: string
+          schedule_time?: string
+          setting_key: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          enabled?: boolean
+          id?: string
+          schedule_time?: string
+          setting_key?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string

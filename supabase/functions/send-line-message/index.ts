@@ -115,7 +115,6 @@ function buildFlexBubble(
         ...(i < entries.length - 1 ? { paddingBottom: "md" } : {}),
       }));
 
-  // Add separators between entries
   const bodyContents: object[] = [];
   entryBoxes.forEach((box, i) => {
     bodyContents.push(box);
@@ -240,18 +239,71 @@ function getTaiwanToday(): string {
 
 function getWeekDates(offset = 0): { start: string; end: string; label: string } {
   const now = getTaiwanDate();
-  const dayOfWeek = now.getUTCDay();
+  const dayOfWeek = now.getUTCDay(); // 0=Sun, 1=Mon, ...
   const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   const monday = new Date(now);
   monday.setUTCDate(now.getUTCDate() + diffToMonday + offset * 7);
-  const friday = new Date(monday);
-  friday.setUTCDate(monday.getUTCDate() + 4);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   return {
     start: fmt(monday),
-    end: fmt(friday),
-    label: `${fmt(monday)} ~ ${fmt(friday)}`,
+    end: fmt(sunday),
+    label: `${fmt(monday)} ~ ${fmt(sunday)}`,
   };
+}
+
+function getMonthDates(): { start: string; end: string; label: string } {
+  const now = getTaiwanDate();
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth() + 1;
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const lastDay = new Date(Date.UTC(year, month, 0));
+  const monthEnd = lastDay.toISOString().split("T")[0];
+  return {
+    start: monthStart,
+    end: monthEnd,
+    label: `${year}/${String(month).padStart(2, "0")}`,
+  };
+}
+
+async function fetchLeavesAndProfiles(
+  supabase: any,
+  startDate: string,
+  endDate: string
+): Promise<{ entries: LeaveEntry[]; pendingCount: number }> {
+  const { data: leaves, error: lErr } = await supabase
+    .from("leave_requests")
+    .select("*")
+    .eq("status", "approved")
+    .lte("start_date", endDate)
+    .gte("end_date", startDate);
+  if (lErr) throw lErr;
+
+  const userIds = [...new Set((leaves ?? []).map((l: any) => l.user_id))];
+  let profileMap = new Map<string, any>();
+  if (userIds.length > 0) {
+    const { data: profiles } = await supabase.from("profiles").select("user_id, name, department").in("user_id", userIds);
+    profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p]));
+  }
+
+  const entries: LeaveEntry[] = (leaves ?? []).map((l: any) => {
+    const p = profileMap.get(l.user_id);
+    return { name: p?.name ?? "未知", department: p?.department ?? "", leaveType: l.leave_type, startDate: l.start_date, endDate: l.end_date };
+  });
+
+  const { count: pendingCount } = await supabase.from("leave_requests").select("*", { count: "exact", head: true }).eq("status", "pending");
+
+  return { entries, pendingCount: pendingCount ?? 0 };
+}
+
+async function sendFlexPush(token: string, targetId: string, altText: string, bubble: object) {
+  const response = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText, contents: bubble }] }),
+  });
+  if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
 }
 
 serve(async (req) => {
@@ -272,6 +324,9 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    const jsonOk = (data: object) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+
     // === New Request Notification ===
     if (mode === "new-request") {
       const { employeeName, department, leaveType, startDate, endDate, reason } = body;
@@ -284,8 +339,7 @@ serve(async (req) => {
             { type: "text", text: "📨 新休假申請", size: "xl", color: "#FFFFFF", weight: "bold" },
             { type: "text", text: "有員工提交了休假申請", size: "xs", color: "#FFFFFFCC", margin: "xs" },
           ],
-          backgroundColor: "#F59E0B",
-          paddingAll: "lg",
+          backgroundColor: "#F59E0B", paddingAll: "lg",
         },
         body: {
           type: "box", layout: "vertical", paddingAll: "lg",
@@ -320,16 +374,11 @@ serve(async (req) => {
         },
       };
 
-      const response = await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
-        body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText: `新休假申請：${employeeName} - ${leaveType}`, contents: bubble }] }),
-      });
-      if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
-      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      await sendFlexPush(LINE_TOKEN, targetId, `新休假申請：${employeeName} - ${leaveType}`, bubble);
+      return jsonOk({ success: true });
     }
 
-    // === Monthly Summary ===
+    // === Monthly Summary (stats) ===
     if (mode === "monthly-summary") {
       const now = getTaiwanDate();
       const year = now.getUTCFullYear();
@@ -389,16 +438,12 @@ serve(async (req) => {
         styles: { footer: { separator: true } },
       };
 
-      const response = await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
-        body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText: `${monthLabel} 月統計報告`, contents: bubble }] }),
-      });
-      if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
-      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      await sendFlexPush(LINE_TOKEN, targetId, `${monthLabel} 月統計報告`, bubble);
+      return jsonOk({ success: true });
     }
 
-    if (mode === "daily-summary" || mode === "weekly-summary") {
+    // === Daily / Weekly / Next-Week Summary ===
+    if (mode === "daily-summary" || mode === "weekly-summary" || mode === "next-week-summary") {
       let startDate: string, endDate: string, title: string, subtitle: string, emoji: string, accentColor: string;
 
       if (mode === "daily-summary") {
@@ -409,6 +454,14 @@ serve(async (req) => {
         subtitle = today;
         emoji = "📋";
         accentColor = "#3B82F6";
+      } else if (mode === "next-week-summary") {
+        const week = getWeekDates(1);
+        startDate = week.start;
+        endDate = week.end;
+        title = "下週休假總覽";
+        subtitle = week.label;
+        emoji = "📅";
+        accentColor = "#F59E0B";
       } else {
         const week = getWeekDates(0);
         startDate = week.start;
@@ -419,65 +472,42 @@ serve(async (req) => {
         accentColor = "#8B5CF6";
       }
 
-      const { data: leaves, error: lErr } = await supabase
-        .from("leave_requests")
-        .select("*")
-        .eq("status", "approved")
-        .lte("start_date", endDate)
-        .gte("end_date", startDate);
-      if (lErr) throw lErr;
+      const { entries, pendingCount } = await fetchLeavesAndProfiles(supabase, startDate, endDate);
+      const bubble = buildFlexBubble(title, subtitle, emoji, accentColor, entries, pendingCount);
+      await sendFlexPush(LINE_TOKEN, targetId, `${title}：共 ${entries.length} 人休假`, bubble);
 
-      const userIds = [...new Set((leaves ?? []).map((l: any) => l.user_id))];
-      let profileMap = new Map<string, any>();
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase.from("profiles").select("user_id, name, department").in("user_id", userIds);
-        profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p]));
-      }
-
-      const entries: LeaveEntry[] = (leaves ?? []).map((l: any) => {
-        const p = profileMap.get(l.user_id);
-        return { name: p?.name ?? "未知", department: p?.department ?? "", leaveType: l.leave_type, startDate: l.start_date, endDate: l.end_date };
-      });
-
-      const { count: pendingCount } = await supabase.from("leave_requests").select("*", { count: "exact", head: true }).eq("status", "pending");
-      const bubble = buildFlexBubble(title, subtitle, emoji, accentColor, entries, pendingCount ?? 0);
-
-      const response = await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
-        body: JSON.stringify({ to: targetId, messages: [{ type: "flex", altText: `${title}：共 ${entries.length} 人休假`, contents: bubble }] }),
-      });
-      if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
-
-      return new Response(
-        JSON.stringify({ success: true, entries: entries.length }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonOk({ success: true, entries: entries.length });
     }
 
-    // === Leave Balance Reminder ===
+    // === Monthly Leave List (detailed per-person list) ===
+    if (mode === "monthly-leave-list") {
+      const m = getMonthDates();
+      const { entries, pendingCount } = await fetchLeavesAndProfiles(supabase, m.start, m.end);
+      const bubble = buildFlexBubble("當月休假明細", m.label, "📆", "#10B981", entries, pendingCount);
+      await sendFlexPush(LINE_TOKEN, targetId, `${m.label} 當月休假明細：共 ${entries.length} 人休假`, bubble);
+
+      return jsonOk({ success: true, entries: entries.length });
+    }
+
+    // === Leave Balance Reminder (enhanced with full details + Flex Message) ===
     if (mode === "leave-balance-reminder") {
       const year = getTaiwanDate().getUTCFullYear();
 
-      // Fetch policies with reminder enabled
       const { data: policies } = await supabase
         .from("leave_policies")
         .select("*")
         .eq("is_active", true);
 
-      // Fetch annual leave rules
       const { data: annualRules } = await supabase
         .from("annual_leave_rules")
         .select("min_months, max_months, days")
         .order("min_months");
 
-      // Fetch all profiles with LINE bound
       const { data: profiles } = await supabase
         .from("profiles")
         .select("user_id, name, department, hire_date, line_user_id")
         .not("line_user_id", "is", null);
 
-      // Fetch all approved leaves this year
       const { data: allLeaves } = await supabase
         .from("leave_requests")
         .select("user_id, leave_type, start_date, end_date")
@@ -485,7 +515,6 @@ serve(async (req) => {
         .gte("start_date", `${year}-01-01`)
         .lte("start_date", `${year}-12-31`);
 
-      // Build used map
       const usedMap = new Map<string, Map<string, number>>();
       for (const l of allLeaves ?? []) {
         const days = Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1;
@@ -494,7 +523,6 @@ serve(async (req) => {
         m.set(l.leave_type, (m.get(l.leave_type) ?? 0) + days);
       }
 
-      // Calculate annual leave for each employee
       function calcAnnualDays(hireDate: string | null, rules: any[]): number {
         if (!hireDate || !rules?.length) return 0;
         const hire = new Date(hireDate);
@@ -515,56 +543,103 @@ serve(async (req) => {
 
       for (const profile of profiles ?? []) {
         const userUsed = usedMap.get(profile.user_id) ?? new Map<string, number>();
-        const alerts: string[] = [];
+
+        // Build Flex Message body rows with full details
+        const balanceRows: object[] = [];
+        const alertRows: object[] = [];
 
         for (const pol of policies ?? []) {
           const total = pol.leave_type === "特休"
             ? calcAnnualDays(profile.hire_date, annualRules ?? [])
             : pol.default_days;
           const used = userUsed.get(pol.leave_type) ?? 0;
+          const remaining = Math.max(total - used, 0);
+          const ratio = total > 0 ? Math.min(used / total, 1) : 0;
 
-          // Check reminder threshold
+          // Progress bar color
+          let barColor = "#4CAF50";
+          if (total > 0 && used > total) barColor = "#EF4444";
+          else if (ratio >= 0.8) barColor = "#F59E0B";
+
+          // Balance row with progress bar
+          balanceRows.push({
+            type: "box", layout: "vertical", margin: "lg",
+            contents: [
+              {
+                type: "box", layout: "horizontal",
+                contents: [
+                  { type: "text", text: pol.leave_type, size: "sm", color: "#333333", weight: "bold", flex: 3 },
+                  { type: "text", text: `已休 ${used} / 額度 ${total} / 剩餘 ${remaining}`, size: "xxs", color: "#888888", flex: 5, align: "end" },
+                ],
+              },
+              {
+                type: "box", layout: "vertical", margin: "sm", height: "6px", cornerRadius: "3px", backgroundColor: "#E0E0E0",
+                contents: [
+                  {
+                    type: "box", layout: "vertical", height: "6px", cornerRadius: "3px",
+                    backgroundColor: barColor,
+                    width: `${Math.round(ratio * 100)}%`,
+                    contents: [],
+                  },
+                ],
+              },
+            ],
+          });
+
+          // Alerts
           if (pol.reminder_enabled && pol.reminder_threshold_days > 0 && used >= pol.reminder_threshold_days) {
-            alerts.push(`⚠️ ${pol.leave_type}：已休 ${used} 天（門檻 ${pol.reminder_threshold_days} 天）`);
+            alertRows.push({ type: "text", text: `⚠️ ${pol.leave_type}：已達門檻 ${pol.reminder_threshold_days} 天`, size: "xs", color: "#F59E0B", margin: "sm", wrap: true });
           }
-
-          // Over-used
           if (total > 0 && used > total) {
-            alerts.push(`🔴 ${pol.leave_type}：已超休！已休 ${used} 天 / 額度 ${total} 天`);
+            alertRows.push({ type: "text", text: `🔴 ${pol.leave_type}：已超休！`, size: "xs", color: "#EF4444", margin: "sm" });
           }
-
-          // Under-used annual leave reminder (after October)
-          if (pol.leave_type === "特休" && currentMonth >= 10 && total > 0) {
-            const ratio = used / total;
-            if (ratio < 0.5) {
-              alerts.push(`🟡 特休提醒：僅使用 ${used}/${total} 天（${Math.round(ratio * 100)}%），年底前請安排休假`);
-            }
+          if (pol.leave_type === "特休" && currentMonth >= 10 && total > 0 && used / total < 0.5) {
+            alertRows.push({ type: "text", text: `🟡 特休僅使用 ${Math.round((used / total) * 100)}%，請安排休假`, size: "xs", color: "#F59E0B", margin: "sm", wrap: true });
           }
         }
 
-        if (alerts.length > 0 && profile.line_user_id) {
-          const text = `📊 ${profile.name} 的休假餘額提醒\n\n${alerts.join("\n")}`;
-          await fetch("https://api.line.me/v2/bot/message/push", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
-            body: JSON.stringify({ to: profile.line_user_id, messages: [{ type: "text", text }] }),
-          });
+        if (balanceRows.length === 0) continue;
+
+        const bodyContents: object[] = [...balanceRows];
+        if (alertRows.length > 0) {
+          bodyContents.push({ type: "separator", margin: "lg", color: "#F0F0F0" });
+          bodyContents.push(...alertRows);
+        }
+
+        const bubble = {
+          type: "bubble", size: "mega",
+          header: {
+            type: "box", layout: "vertical",
+            contents: [
+              { type: "text", text: "📊 休假餘額報告", size: "xl", color: "#FFFFFF", weight: "bold" },
+              { type: "text", text: `${profile.name} — ${year} 年度`, size: "xs", color: "#FFFFFFCC", margin: "xs" },
+            ],
+            backgroundColor: "#3B82F6", paddingAll: "lg",
+          },
+          body: { type: "box", layout: "vertical", contents: bodyContents, paddingAll: "lg" },
+          footer: {
+            type: "box", layout: "vertical",
+            contents: [{ type: "text", text: alertRows.length > 0 ? `${alertRows.length} 項提醒` : "✅ 休假使用正常", size: "xs", color: "#AAAAAA", align: "end" }],
+            paddingAll: "md", backgroundColor: "#FAFAFA",
+          },
+          styles: { footer: { separator: true } },
+        };
+
+        if (profile.line_user_id) {
+          await sendFlexPush(LINE_TOKEN, profile.line_user_id, `${profile.name} 的休假餘額報告`, bubble);
           sentCount++;
         }
       }
 
-      // Also send summary to admin
-      const summaryText = `✅ 休假餘額提醒已發送給 ${sentCount} 位員工`;
+      // Admin summary
+      const summaryText = `✅ 休假餘額提醒已發送給 ${sentCount} 位員工（含完整天數明細）`;
       await fetch("https://api.line.me/v2/bot/message/push", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
         body: JSON.stringify({ to: targetId, messages: [{ type: "text", text: summaryText }] }),
       });
 
-      return new Response(
-        JSON.stringify({ success: true, sentCount }),
-        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      return jsonOk({ success: true, sentCount });
     }
 
     // Direct message fallback
@@ -578,22 +653,12 @@ serve(async (req) => {
 
     const response = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${LINE_TOKEN}`,
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
       body: JSON.stringify({ to: targetId, messages: [{ type: "text", text: message }] }),
     });
+    if (!response.ok) throw new Error(`LINE API error [${response.status}]: ${await response.text()}`);
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`LINE API error [${response.status}]: ${errorBody}`);
-    }
-
-    return new Response(
-      JSON.stringify({ success: true }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    return new Response(JSON.stringify({ success: true }), { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: unknown) {
     console.error("Error sending LINE message:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

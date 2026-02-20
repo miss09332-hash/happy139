@@ -24,6 +24,22 @@ export async function sendWeeklySummary() {
   return data;
 }
 
+export async function sendNextWeekSummary() {
+  const { data, error } = await supabase.functions.invoke("send-line-message", {
+    body: { mode: "next-week-summary" },
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function sendMonthlyLeaveList() {
+  const { data, error } = await supabase.functions.invoke("send-line-message", {
+    body: { mode: "monthly-leave-list" },
+  });
+  if (error) throw error;
+  return data;
+}
+
 export async function sendLeaveBalanceReminder() {
   const { data, error } = await supabase.functions.invoke("send-line-message", {
     body: { mode: "leave-balance-reminder" },
