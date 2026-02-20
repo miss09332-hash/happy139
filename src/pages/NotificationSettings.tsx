@@ -4,21 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Bell, Clock, MessageSquare, BellOff, Save } from "lucide-react";
+import { Bell, Clock, BellOff, Save, Send, CalendarDays } from "lucide-react";
 import { toast } from "sonner";
+import { sendDailySummary, sendWeeklySummary } from "@/lib/line";
 
 export default function NotificationSettings() {
   const [settings, setSettings] = useState({
     dailyReminder: true,
     reminderTime: "08:00",
-    lineChannel: "全公司群組",
     newLeaveNotify: true,
     approvalNotify: true,
     dndStart: "22:00",
@@ -30,6 +23,26 @@ export default function NotificationSettings() {
     toast.success("通知設置已儲存");
   };
 
+  const handleSendDaily = async () => {
+    try {
+      toast.loading("正在發送今日休假提醒...", { id: "line-daily" });
+      await sendDailySummary();
+      toast.success("今日休假提醒已發送", { id: "line-daily" });
+    } catch (err: any) {
+      toast.error("發送失敗", { id: "line-daily", description: err.message });
+    }
+  };
+
+  const handleSendWeekly = async () => {
+    try {
+      toast.loading("正在發送本週休假總覽...", { id: "line-weekly" });
+      await sendWeeklySummary();
+      toast.success("本週休假總覽已發送", { id: "line-weekly" });
+    } catch (err: any) {
+      toast.error("發送失敗", { id: "line-weekly", description: err.message });
+    }
+  };
+
   return (
     <div className="min-h-screen p-6 lg:p-8 max-w-3xl">
       <div className="mb-8">
@@ -38,6 +51,27 @@ export default function NotificationSettings() {
       </div>
 
       <div className="space-y-6">
+        {/* Manual Send */}
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Send className="h-5 w-5 text-primary" />
+              手動發送通知
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">立即發送 Flex Message 格式的休假提醒至 LINE</p>
+            <div className="flex flex-wrap gap-3">
+              <Button onClick={handleSendDaily} className="gap-2">
+                <Clock className="h-4 w-4" />今日休假提醒
+              </Button>
+              <Button onClick={handleSendWeekly} variant="outline" className="gap-2">
+                <CalendarDays className="h-4 w-4" />本週休假總覽
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Daily Reminder */}
         <Card className="glass-card">
           <CardHeader>
@@ -65,34 +99,6 @@ export default function NotificationSettings() {
                 onChange={(e) => setSettings({ ...settings, reminderTime: e.target.value })}
                 className="w-40"
               />
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Channel */}
-        <Card className="glass-card">
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              通知頻道
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label>LINE 群組</Label>
-              <Select
-                value={settings.lineChannel}
-                onValueChange={(v) => setSettings({ ...settings, lineChannel: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="全公司群組">全公司群組</SelectItem>
-                  <SelectItem value="管理層群組">管理層群組</SelectItem>
-                  <SelectItem value="HR群組">HR 群組</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
           </CardContent>
         </Card>
