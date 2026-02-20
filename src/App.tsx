@@ -10,6 +10,7 @@ import RequestLeave from "./pages/RequestLeave";
 import LeaveCalendar from "./pages/LeaveCalendar";
 import Admin from "./pages/Admin";
 import NotificationSettings from "./pages/NotificationSettings";
+import LeavePolicies from "./pages/LeavePolicies";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -58,6 +59,14 @@ const App = () => (
                 }
               />
               <Route path="/notification-settings" element={<NotificationSettings />} />
+              <Route
+                path="/leave-policies"
+                element={
+                  <AdminRoute>
+                    <LeavePolicies />
+                  </AdminRoute>
+                }
+              />
             </Route>
             <Route path="*" element={<NotFound />} />
           </Routes>
