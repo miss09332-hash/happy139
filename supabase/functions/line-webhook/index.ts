@@ -232,8 +232,8 @@ function buildMonthlyLeaveBubble(entries: { name: string; dept: string; type: st
         return items;
       }).flat();
 
-  const now = new Date();
-  const monthLabel = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const twNow = new Date(new Date().getTime() + 8 * 60 * 60 * 1000);
+  const monthLabel = `${twNow.getUTCFullYear()}/${String(twNow.getUTCMonth() + 1).padStart(2, "0")}`;
 
   return {
     type: "flex", altText: `${monthLabel} 休假清單`,
@@ -463,7 +463,7 @@ serve(async (req) => {
             .select("min_months, max_months, days")
             .order("min_months");
 
-          const year = new Date().getFullYear();
+          const year = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).getUTCFullYear();
           const { data: leaves } = await supabase
             .from("leave_requests")
             .select("leave_type, start_date, end_date")
@@ -516,9 +516,9 @@ serve(async (req) => {
         }
 
         if (text.includes("當月休假")) {
-          const now = new Date();
-          const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-          const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+          const twNow = new Date(new Date().getTime() + 8 * 60 * 60 * 1000);
+          const monthStart = `${twNow.getUTCFullYear()}-${String(twNow.getUTCMonth() + 1).padStart(2, "0")}-01`;
+          const nextMonth = new Date(Date.UTC(twNow.getUTCFullYear(), twNow.getUTCMonth() + 1, 0));
           const monthEnd = nextMonth.toISOString().split("T")[0];
 
           const { data: leaves } = await supabase

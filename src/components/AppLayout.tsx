@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Palmtree,
   LogOut,
+  BarChart3,
 } from "lucide-react";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,7 @@ export default function AppLayout() {
     { to: "/request-leave", icon: FileText, label: "申請休假", show: true },
     { to: "/leave-calendar", icon: Calendar, label: "休假日曆", show: true },
     { to: "/admin", icon: Settings, label: "管理後台", show: isAdmin },
+    { to: "/leave-balance", icon: BarChart3, label: "休假餘額", show: isAdmin },
     { to: "/leave-policies", icon: ClipboardList, label: "休假條件", show: isAdmin },
     { to: "/employee-management", icon: Users, label: "員工管理", show: isAdmin },
     { to: "/notification-settings", icon: Bell, label: "通知設置", show: isAdmin },

@@ -11,6 +11,7 @@ import LeaveCalendar from "./pages/LeaveCalendar";
 import Admin from "./pages/Admin";
 import NotificationSettings from "./pages/NotificationSettings";
 import LeavePolicies from "./pages/LeavePolicies";
+import LeaveBalance from "./pages/LeaveBalance";
 import EmployeeManagement from "./pages/EmployeeManagement";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
@@ -60,6 +61,14 @@ const App = () => (
                 }
               />
               <Route path="/notification-settings" element={<NotificationSettings />} />
+              <Route
+                path="/leave-balance"
+                element={
+                  <AdminRoute>
+                    <LeaveBalance />
+                  </AdminRoute>
+                }
+              />
               <Route
                 path="/leave-policies"
                 element={

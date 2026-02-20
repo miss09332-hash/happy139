@@ -46,6 +46,8 @@ export type Database = {
           id: string
           is_active: boolean
           leave_type: string
+          reminder_enabled: boolean | null
+          reminder_threshold_days: number | null
           updated_at: string
         }
         Insert: {
@@ -55,6 +57,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           leave_type: string
+          reminder_enabled?: boolean | null
+          reminder_threshold_days?: number | null
           updated_at?: string
         }
         Update: {
@@ -64,6 +68,8 @@ export type Database = {
           id?: string
           is_active?: boolean
           leave_type?: string
+          reminder_enabled?: boolean | null
+          reminder_threshold_days?: number | null
           updated_at?: string
         }
         Relationships: []

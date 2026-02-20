@@ -229,14 +229,23 @@ function getLeaveTypeColor(type: string): string {
   return colors[type] ?? "#9CA3AF";
 }
 
-function getWeekDates(offset = 0): { start: string; end: string; label: string } {
+function getTaiwanDate(): Date {
   const now = new Date();
-  const dayOfWeek = now.getDay();
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000);
+}
+
+function getTaiwanToday(): string {
+  return getTaiwanDate().toISOString().split("T")[0];
+}
+
+function getWeekDates(offset = 0): { start: string; end: string; label: string } {
+  const now = getTaiwanDate();
+  const dayOfWeek = now.getUTCDay();
   const diffToMonday = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
   const monday = new Date(now);
-  monday.setDate(now.getDate() + diffToMonday + offset * 7);
+  monday.setUTCDate(now.getUTCDate() + diffToMonday + offset * 7);
   const friday = new Date(monday);
-  friday.setDate(monday.getDate() + 4);
+  friday.setUTCDate(monday.getUTCDate() + 4);
   const fmt = (d: Date) => d.toISOString().split("T")[0];
   return {
     start: fmt(monday),
@@ -322,11 +331,13 @@ serve(async (req) => {
 
     // === Monthly Summary ===
     if (mode === "monthly-summary") {
-      const now = new Date();
-      const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-      const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const now = getTaiwanDate();
+      const year = now.getUTCFullYear();
+      const month = now.getUTCMonth() + 1;
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const lastDay = new Date(Date.UTC(year, month, 0));
       const monthEnd = lastDay.toISOString().split("T")[0];
-      const monthLabel = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, "0")}`;
+      const monthLabel = `${year}/${String(month).padStart(2, "0")}`;
 
       const { data: leaves } = await supabase
         .from("leave_requests")
@@ -391,7 +402,7 @@ serve(async (req) => {
       let startDate: string, endDate: string, title: string, subtitle: string, emoji: string, accentColor: string;
 
       if (mode === "daily-summary") {
-        const today = new Date().toISOString().split("T")[0];
+        const today = getTaiwanToday();
         startDate = today;
         endDate = today;
         title = "今日休假提醒";
@@ -440,6 +451,118 @@ serve(async (req) => {
 
       return new Response(
         JSON.stringify({ success: true, entries: entries.length }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // === Leave Balance Reminder ===
+    if (mode === "leave-balance-reminder") {
+      const year = getTaiwanDate().getUTCFullYear();
+
+      // Fetch policies with reminder enabled
+      const { data: policies } = await supabase
+        .from("leave_policies")
+        .select("*")
+        .eq("is_active", true);
+
+      // Fetch annual leave rules
+      const { data: annualRules } = await supabase
+        .from("annual_leave_rules")
+        .select("min_months, max_months, days")
+        .order("min_months");
+
+      // Fetch all profiles with LINE bound
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("user_id, name, department, hire_date, line_user_id")
+        .not("line_user_id", "is", null);
+
+      // Fetch all approved leaves this year
+      const { data: allLeaves } = await supabase
+        .from("leave_requests")
+        .select("user_id, leave_type, start_date, end_date")
+        .in("status", ["approved", "pending"])
+        .gte("start_date", `${year}-01-01`)
+        .lte("start_date", `${year}-12-31`);
+
+      // Build used map
+      const usedMap = new Map<string, Map<string, number>>();
+      for (const l of allLeaves ?? []) {
+        const days = Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1;
+        if (!usedMap.has(l.user_id)) usedMap.set(l.user_id, new Map());
+        const m = usedMap.get(l.user_id)!;
+        m.set(l.leave_type, (m.get(l.leave_type) ?? 0) + days);
+      }
+
+      // Calculate annual leave for each employee
+      function calcAnnualDays(hireDate: string | null, rules: any[]): number {
+        if (!hireDate || !rules?.length) return 0;
+        const hire = new Date(hireDate);
+        const now = new Date();
+        const months = (now.getFullYear() - hire.getFullYear()) * 12 + (now.getMonth() - hire.getMonth());
+        if (months < 6) return 0;
+        for (const rule of rules) {
+          if (rule.max_months === null) {
+            return Math.min(rule.days + Math.floor((months - rule.min_months) / 12), 30);
+          }
+          if (months >= rule.min_months && months < rule.max_months) return rule.days;
+        }
+        return 0;
+      }
+
+      const currentMonth = getTaiwanDate().getUTCMonth() + 1;
+      let sentCount = 0;
+
+      for (const profile of profiles ?? []) {
+        const userUsed = usedMap.get(profile.user_id) ?? new Map<string, number>();
+        const alerts: string[] = [];
+
+        for (const pol of policies ?? []) {
+          const total = pol.leave_type === "特休"
+            ? calcAnnualDays(profile.hire_date, annualRules ?? [])
+            : pol.default_days;
+          const used = userUsed.get(pol.leave_type) ?? 0;
+
+          // Check reminder threshold
+          if (pol.reminder_enabled && pol.reminder_threshold_days > 0 && used >= pol.reminder_threshold_days) {
+            alerts.push(`⚠️ ${pol.leave_type}：已休 ${used} 天（門檻 ${pol.reminder_threshold_days} 天）`);
+          }
+
+          // Over-used
+          if (total > 0 && used > total) {
+            alerts.push(`🔴 ${pol.leave_type}：已超休！已休 ${used} 天 / 額度 ${total} 天`);
+          }
+
+          // Under-used annual leave reminder (after October)
+          if (pol.leave_type === "特休" && currentMonth >= 10 && total > 0) {
+            const ratio = used / total;
+            if (ratio < 0.5) {
+              alerts.push(`🟡 特休提醒：僅使用 ${used}/${total} 天（${Math.round(ratio * 100)}%），年底前請安排休假`);
+            }
+          }
+        }
+
+        if (alerts.length > 0 && profile.line_user_id) {
+          const text = `📊 ${profile.name} 的休假餘額提醒\n\n${alerts.join("\n")}`;
+          await fetch("https://api.line.me/v2/bot/message/push", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+            body: JSON.stringify({ to: profile.line_user_id, messages: [{ type: "text", text }] }),
+          });
+          sentCount++;
+        }
+      }
+
+      // Also send summary to admin
+      const summaryText = `✅ 休假餘額提醒已發送給 ${sentCount} 位員工`;
+      await fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+        body: JSON.stringify({ to: targetId, messages: [{ type: "text", text: summaryText }] }),
+      });
+
+      return new Response(
+        JSON.stringify({ success: true, sentCount }),
         { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
