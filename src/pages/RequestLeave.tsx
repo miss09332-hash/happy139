@@ -34,8 +34,30 @@ export default function RequestLeave() {
       toast.error("請填寫所有必要欄位");
       return;
     }
+    if (form.startDate > form.endDate) {
+      toast.error("結束日期不能早於開始日期");
+      return;
+    }
     setSubmitting(true);
     try {
+      // 檢查日期重疊
+      const { data: overlapping } = await supabase
+        .from("leave_requests")
+        .select("id, leave_type, start_date, end_date")
+        .eq("user_id", user!.id)
+        .in("status", ["pending", "approved"])
+        .lte("start_date", form.endDate)
+        .gte("end_date", form.startDate);
+
+      if (overlapping && overlapping.length > 0) {
+        const existing = overlapping[0];
+        toast.error("日期重疊", {
+          description: `您已有一筆「${existing.leave_type}」假單（${existing.start_date} ~ ${existing.end_date}）與此日期重疊，無法重複申請。`,
+        });
+        setSubmitting(false);
+        return;
+      }
+
       const { error } = await supabase.from("leave_requests").insert({
         user_id: user!.id,
         leave_type: form.leaveType,
