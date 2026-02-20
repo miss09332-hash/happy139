@@ -14,6 +14,30 @@ export type Database = {
   }
   public: {
     Tables: {
+      annual_leave_rules: {
+        Row: {
+          created_at: string
+          days: number
+          id: string
+          max_months: number | null
+          min_months: number
+        }
+        Insert: {
+          created_at?: string
+          days: number
+          id?: string
+          max_months?: number | null
+          min_months: number
+        }
+        Update: {
+          created_at?: string
+          days?: number
+          id?: string
+          max_months?: number | null
+          min_months?: number
+        }
+        Relationships: []
+      }
       leave_policies: {
         Row: {
           created_at: string
@@ -84,6 +108,7 @@ export type Database = {
         Row: {
           created_at: string
           department: string
+          hire_date: string | null
           id: string
           line_user_id: string | null
           name: string
@@ -93,6 +118,7 @@ export type Database = {
         Insert: {
           created_at?: string
           department?: string
+          hire_date?: string | null
           id?: string
           line_user_id?: string | null
           name: string
@@ -102,6 +128,7 @@ export type Database = {
         Update: {
           created_at?: string
           department?: string
+          hire_date?: string | null
           id?: string
           line_user_id?: string | null
           name?: string

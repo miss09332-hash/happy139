@@ -316,7 +316,7 @@ serve(async (req) => {
       // Look up bound profile
       const { data: profile } = await supabase
         .from("profiles")
-        .select("user_id, name, department")
+        .select("user_id, name, department, hire_date")
         .eq("line_user_id", userId)
         .maybeSingle();
 
@@ -397,6 +397,41 @@ serve(async (req) => {
             await replyMessage(replyToken, LINE_TOKEN, [
               buildSuccessBubble(leaveType, startDate, endDate, reason),
             ]);
+            // Notify admin via LINE push
+            const NOTIFY_TARGET = Deno.env.get("LINE_NOTIFY_TARGET_ID");
+            if (NOTIFY_TARGET) {
+              const dateText = startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
+              const notifyBubble = {
+                type: "bubble",
+                header: { type: "box", layout: "vertical", contents: [
+                  { type: "text", text: "📨 新休假申請 (LINE)", size: "lg", color: "#FFFFFF", weight: "bold" },
+                ], backgroundColor: "#F59E0B", paddingAll: "lg" },
+                body: { type: "box", layout: "vertical", paddingAll: "lg", contents: [
+                  { type: "box", layout: "horizontal", margin: "md", contents: [
+                    { type: "text", text: "員工", size: "sm", color: "#AAAAAA", flex: 2 },
+                    { type: "text", text: `${profile.name}${profile.department ? ` (${profile.department})` : ""}`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+                  ]},
+                  { type: "separator", margin: "md", color: "#F0F0F0" },
+                  { type: "box", layout: "horizontal", margin: "md", contents: [
+                    { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
+                    { type: "text", text: leaveType, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+                  ]},
+                  { type: "separator", margin: "md", color: "#F0F0F0" },
+                  { type: "box", layout: "horizontal", margin: "md", contents: [
+                    { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
+                    { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+                  ]},
+                ]},
+                footer: { type: "box", layout: "vertical", contents: [
+                  { type: "text", text: "⏳ 請前往後台審核", size: "xs", color: "#F59E0B", align: "center" },
+                ], paddingAll: "md", backgroundColor: "#FFFBEB" },
+              };
+              fetch("https://api.line.me/v2/bot/message/push", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+                body: JSON.stringify({ to: NOTIFY_TARGET, messages: [{ type: "flex", altText: `新休假申請：${profile.name} - ${leaveType}`, contents: notifyBubble }] }),
+              }).catch(() => {});
+            }
           }
           continue;
         }
@@ -421,6 +456,13 @@ serve(async (req) => {
             .from("leave_policies")
             .select("*")
             .eq("is_active", true);
+
+          // Fetch annual leave rules for dynamic calculation
+          const { data: annualRules } = await supabase
+            .from("annual_leave_rules")
+            .select("min_months, max_months, days")
+            .order("min_months");
+
           const year = new Date().getFullYear();
           const { data: leaves } = await supabase
             .from("leave_requests")
@@ -439,9 +481,32 @@ serve(async (req) => {
             usedMap.set(l.leave_type, (usedMap.get(l.leave_type) ?? 0) + days);
           }
 
-          const balances = (policies ?? []).map((p) => ({
+          // Calculate dynamic annual leave days based on hire_date
+          let dynamicAnnualDays: number | null = null;
+          if (profile.hire_date && annualRules?.length) {
+            const hireDate = new Date(profile.hire_date);
+            const now = new Date();
+            const monthsOfService = (now.getFullYear() - hireDate.getFullYear()) * 12 + (now.getMonth() - hireDate.getMonth());
+            if (monthsOfService >= 6) {
+              for (const rule of annualRules) {
+                if (rule.max_months === null) {
+                  const extraYears = Math.floor((monthsOfService - rule.min_months) / 12);
+                  dynamicAnnualDays = Math.min(rule.days + extraYears, 30);
+                  break;
+                }
+                if (monthsOfService >= rule.min_months && monthsOfService < rule.max_months) {
+                  dynamicAnnualDays = rule.days;
+                  break;
+                }
+              }
+            } else {
+              dynamicAnnualDays = 0;
+            }
+          }
+
+          const balances = (policies ?? []).map((p: any) => ({
             type: p.leave_type,
-            total: p.default_days,
+            total: p.leave_type === "特休" && dynamicAnnualDays !== null ? dynamicAnnualDays : p.default_days,
             used: usedMap.get(p.leave_type) ?? 0,
             color: getLeaveTypeColor(p.leave_type),
           }));
