@@ -61,7 +61,7 @@ const steps = [
 
 export default function RichMenuGenerator() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [showGuide, setShowGuide] = useState(false);
+  const [showGuide, setShowGuide] = useState(true);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
   useEffect(() => {

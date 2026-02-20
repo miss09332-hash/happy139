@@ -646,6 +646,19 @@ serve(async (req) => {
       return jsonOk({ success: true, sentCount });
     }
 
+    // === Flex Push (generic bubble push to a specific user) ===
+    if (mode === "flex-push") {
+      const { to: flexTo, altText, bubble } = body;
+      if (!flexTo || !bubble) {
+        return new Response(
+          JSON.stringify({ success: false, error: "Missing 'to' or 'bubble' for flex-push" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      await sendFlexPush(LINE_TOKEN, flexTo, altText ?? "系統通知", bubble);
+      return jsonOk({ success: true });
+    }
+
     // Direct message fallback
     const { message } = body;
     if (!targetId || !message) {
