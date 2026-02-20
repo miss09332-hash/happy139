@@ -13,6 +13,7 @@ interface LeaveEntry {
   leaveType: string;
   startDate: string;
   endDate: string;
+  days: number;
 }
 
 function buildFlexBubble(
@@ -96,7 +97,9 @@ function buildFlexBubble(
                   },
                   {
                     type: "text",
-                    text: e.startDate === e.endDate ? e.startDate : `${e.startDate} ~ ${e.endDate}`,
+                    text: e.startDate === e.endDate
+                      ? `${e.startDate} 共計${e.days}天`
+                      : `${e.startDate}~${e.endDate} 共計${e.days}天`,
                     size: "xxs",
                     color: "#888888",
                     margin: "sm",
@@ -289,7 +292,8 @@ async function fetchLeavesAndProfiles(
 
   const entries: LeaveEntry[] = (leaves ?? []).map((l: any) => {
     const p = profileMap.get(l.user_id);
-    return { name: p?.name ?? "未知", department: p?.department ?? "", leaveType: l.leave_type, startDate: l.start_date, endDate: l.end_date };
+    const days = Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1;
+    return { name: p?.name ?? "未知", department: p?.department ?? "", leaveType: l.leave_type, startDate: l.start_date, endDate: l.end_date, days };
   });
 
   const { count: pendingCount } = await supabase.from("leave_requests").select("*", { count: "exact", head: true }).eq("status", "pending");

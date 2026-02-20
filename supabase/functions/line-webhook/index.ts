@@ -379,6 +379,30 @@ serve(async (req) => {
           const endDate = dateMatch[2] || startDate;
           const reason = dateMatch[3] || "";
 
+          // 檢查日期重疊
+          const { data: overlapping } = await supabase
+            .from("leave_requests")
+            .select("id, leave_type, start_date, end_date")
+            .eq("user_id", profile.user_id)
+            .in("status", ["pending", "approved"])
+            .lte("start_date", endDate)
+            .gte("end_date", startDate);
+
+          if (overlapping && overlapping.length > 0) {
+            const existing = overlapping[0];
+            await replyMessage(replyToken, LINE_TOKEN, [
+              buildTextMessage(`❌ 日期重疊！\n您已有一筆「${existing.leave_type}」假單（${existing.start_date} ~ ${existing.end_date}）與此日期重疊，無法重複申請。\n\n請重新輸入其他日期，或傳送「取消」放棄。`),
+            ]);
+            continue;
+          }
+
+          // Handle cancel
+          if (text === "取消") {
+            userState.delete(userId);
+            await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("已取消申請。")]);
+            continue;
+          }
+
           // Insert leave request
           const { error: insertErr } = await supabase.from("leave_requests").insert({
             user_id: profile.user_id,
@@ -549,10 +573,20 @@ serve(async (req) => {
           continue;
         }
 
-        // Default help
-        await replyMessage(replyToken, LINE_TOKEN, [
-          buildTextMessage("👋 您好！請傳送以下指令：\n\n📝 申請休假\n📊 查詢假期\n📆 當月休假"),
-        ]);
+        // Default help with Quick Reply
+        const APP_URL = "https://id-preview--c01a8d7a-ca4a-4296-b0f5-7ae0f33dd9b2.lovable.app";
+        await replyMessage(replyToken, LINE_TOKEN, [{
+          type: "text",
+          text: "👋 您好！請選擇功能：",
+          quickReply: {
+            items: [
+              { type: "action", action: { type: "message", label: "📝 申請休假", text: "申請休假" } },
+              { type: "action", action: { type: "message", label: "📊 查詢假期", text: "查詢假期" } },
+              { type: "action", action: { type: "message", label: "📆 當月休假", text: "當月休假" } },
+              { type: "action", action: { type: "uri", label: "🌐 網頁版請假", uri: `${APP_URL}/request-leave` } },
+            ],
+          },
+        }]);
       }
     }
 
