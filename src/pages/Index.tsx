@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { fetchLeavesWithProfiles, LeaveWithProfile } from "@/lib/queries";
+import { sendDailySummary } from "@/lib/line";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/10 text-warning",
@@ -90,7 +91,15 @@ export default function Index() {
 
       <div className="flex flex-wrap gap-3 mb-8">
         {isAdmin && (
-          <Button onClick={() => toast.success("LINE 通知已發送")} className="gap-2">
+          <Button onClick={async () => {
+            try {
+              toast.loading("正在發送 LINE 通知...", { id: "line-send" });
+              await sendDailySummary();
+              toast.success("LINE 通知已發送", { id: "line-send" });
+            } catch (err: any) {
+              toast.error("發送失敗", { id: "line-send", description: err.message });
+            }
+          }} className="gap-2">
             <Send className="h-4 w-4" />發送 LINE 通知
           </Button>
         )}
