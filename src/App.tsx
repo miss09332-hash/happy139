@@ -14,6 +14,7 @@ import LeavePolicies from "./pages/LeavePolicies";
 import LeaveBalance from "./pages/LeaveBalance";
 import EmployeeManagement from "./pages/EmployeeManagement";
 import Auth from "./pages/Auth";
+import RichMenuGenerator from "./pages/RichMenuGenerator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -82,6 +83,14 @@ const App = () => (
                 element={
                   <AdminRoute>
                     <EmployeeManagement />
+                  </AdminRoute>
+                }
+              />
+              <Route
+                path="/rich-menu-generator"
+                element={
+                  <AdminRoute>
+                    <RichMenuGenerator />
                   </AdminRoute>
                 }
               />
