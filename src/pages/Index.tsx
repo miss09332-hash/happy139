@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -39,6 +39,18 @@ export default function Index() {
   const { isAdmin } = useAuth();
   const today = new Date().toISOString().split("T")[0];
 
+  const formatDateTime = () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  };
+  const [currentTime, setCurrentTime] = useState(formatDateTime);
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(formatDateTime()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   const { data: todayLeaves = [] } = useQuery({
     queryKey: ["today-leaves", today],
     queryFn: () => fetchLeavesWithProfiles({ status: "approved", dateFrom: today, dateTo: today }),
@@ -61,32 +73,39 @@ export default function Index() {
   );
 
   const stats = [
-    { label: "今日休假", value: todayLeaves.length, icon: Users, color: "text-primary" },
-    { label: "待審核", value: pendingCount, icon: Clock, color: "text-warning" },
-    { label: "今日日期", value: today, icon: CalendarDays, color: "text-accent", isDate: true },
+    { label: "今日休假", value: todayLeaves.length, icon: Users, color: "text-primary", to: "/leave-calendar" },
+    { label: "待審核", value: pendingCount, icon: Clock, color: "text-warning", to: "/admin" },
+    { label: "今日日期", value: currentTime, icon: CalendarDays, color: "text-accent", isDate: true, to: undefined as string | undefined },
   ];
 
   return (
     <div className="min-h-screen p-6 lg:p-8">
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">休假管理總覽</h1>
-        <p className="text-muted-foreground mt-1">{today}</p>
+        <p className="text-muted-foreground mt-1">{currentTime}</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3 mb-8">
-        {stats.map((s) => (
-          <Card key={s.label} className="glass-card">
-            <CardContent className="flex items-center gap-4 p-5">
-              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-secondary ${s.color}`}>
-                <s.icon className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">{s.label}</p>
-                <p className={s.isDate ? "text-lg font-bold" : "text-2xl font-bold"}>{s.value}</p>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+        {stats.map((s) => {
+          const card = (
+            <Card key={s.label} className={`glass-card ${s.to ? "hover:border-primary/30 hover:shadow-md transition-all cursor-pointer" : ""}`}>
+              <CardContent className="flex items-center gap-4 p-5">
+                <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-secondary ${s.color}`}>
+                  <s.icon className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="text-sm text-muted-foreground">{s.label}</p>
+                  <p className={s.isDate ? "text-sm font-bold" : "text-2xl font-bold"}>{s.value}</p>
+                </div>
+              </CardContent>
+            </Card>
+          );
+          return s.to ? (
+            <Link key={s.label} to={s.to}>{card}</Link>
+          ) : (
+            <div key={s.label}>{card}</div>
+          );
+        })}
       </div>
 
       <div className="flex flex-wrap gap-3 mb-8">
