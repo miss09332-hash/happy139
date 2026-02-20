@@ -1,48 +1,50 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { leaveRequests } from "@/data/mockData";
-import { StatusBadge, LeaveTypeBadge } from "@/components/StatusBadge";
 import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useQuery } from "@tanstack/react-query";
+import { fetchLeavesWithProfiles } from "@/lib/queries";
 
 const daysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
 const monthNames = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"];
 const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
 
+const statusColors: Record<string, string> = { pending: "bg-warning/10 text-warning", approved: "bg-success/10 text-success", rejected: "bg-destructive/10 text-destructive" };
+const statusLabels: Record<string, string> = { pending: "待審核", approved: "已核准", rejected: "已拒絕" };
+const leaveTypeColors: Record<string, string> = {
+  "特休": "bg-primary/10 text-primary", "病假": "bg-destructive/10 text-destructive",
+  "事假": "bg-warning/10 text-warning", "婚假": "bg-accent/10 text-accent",
+  "產假": "bg-info/10 text-info", "喪假": "bg-muted text-muted-foreground",
+};
+
 export default function LeaveCalendar() {
-  const [year, setYear] = useState(2026);
-  const [month, setMonth] = useState(1); // Feb = 1
-  const [selectedDate, setSelectedDate] = useState("2026-02-20");
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
+  const [selectedDate, setSelectedDate] = useState(now.toISOString().split("T")[0]);
   const [search, setSearch] = useState("");
 
   const totalDays = daysInMonth(year, month);
   const firstDay = new Date(year, month, 1).getDay();
+  const monthStart = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const monthEnd = `${year}-${String(month + 1).padStart(2, "0")}-${String(totalDays).padStart(2, "0")}`;
 
-  const formatDate = (d: number) => {
-    const m = String(month + 1).padStart(2, "0");
-    const day = String(d).padStart(2, "0");
-    return `${year}-${m}-${day}`;
-  };
+  const { data: monthLeaves = [] } = useQuery({
+    queryKey: ["month-leaves", monthStart, monthEnd],
+    queryFn: () => fetchLeavesWithProfiles({ status: "approved", dateFrom: monthStart, dateTo: monthEnd }),
+  });
 
-  const getLeavesForDate = (dateStr: string) =>
-    leaveRequests.filter(
-      (r) => r.status === "approved" && r.startDate <= dateStr && r.endDate >= dateStr
-    );
+  const formatDate = (d: number) => `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const getLeavesForDate = (dateStr: string) => monthLeaves.filter((r) => r.start_date <= dateStr && r.end_date >= dateStr);
 
-  const selectedLeaves = leaveRequests
-    .filter((r) => r.startDate <= selectedDate && r.endDate >= selectedDate)
-    .filter((r) => r.employeeName.includes(search) || r.department.includes(search));
+  const selectedLeaves = monthLeaves
+    .filter((r) => r.start_date <= selectedDate && r.end_date >= selectedDate)
+    .filter((r) => r.profile_name.includes(search) || r.profile_department.includes(search));
 
-  const prevMonth = () => {
-    if (month === 0) { setMonth(11); setYear(year - 1); }
-    else setMonth(month - 1);
-  };
-
-  const nextMonth = () => {
-    if (month === 11) { setMonth(0); setYear(year + 1); }
-    else setMonth(month + 1);
-  };
+  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(year - 1); } else setMonth(month - 1); };
+  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(year + 1); } else setMonth(month + 1); };
+  const todayStr = now.toISOString().split("T")[0];
 
   return (
     <div className="min-h-screen p-6 lg:p-8">
@@ -52,50 +54,29 @@ export default function LeaveCalendar() {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
-        {/* Calendar */}
         <Card className="glass-card">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <Button variant="ghost" size="icon" onClick={prevMonth}>
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
+              <Button variant="ghost" size="icon" onClick={prevMonth}><ChevronLeft className="h-4 w-4" /></Button>
               <CardTitle className="text-lg">{year} 年 {monthNames[month]}</CardTitle>
-              <Button variant="ghost" size="icon" onClick={nextMonth}>
-                <ChevronRight className="h-4 w-4" />
-              </Button>
+              <Button variant="ghost" size="icon" onClick={nextMonth}><ChevronRight className="h-4 w-4" /></Button>
             </div>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-7 gap-1">
-              {dayNames.map((d) => (
-                <div key={d} className="text-center text-xs font-medium text-muted-foreground py-2">
-                  {d}
-                </div>
-              ))}
-              {Array.from({ length: firstDay }).map((_, i) => (
-                <div key={`empty-${i}`} />
-              ))}
+              {dayNames.map((d) => <div key={d} className="text-center text-xs font-medium text-muted-foreground py-2">{d}</div>)}
+              {Array.from({ length: firstDay }).map((_, i) => <div key={`e-${i}`} />)}
               {Array.from({ length: totalDays }).map((_, i) => {
                 const day = i + 1;
                 const dateStr = formatDate(day);
                 const leaves = getLeavesForDate(dateStr);
                 const isSelected = dateStr === selectedDate;
-                const isToday = dateStr === "2026-02-20";
-
+                const isToday = dateStr === todayStr;
                 return (
-                  <button
-                    key={day}
-                    onClick={() => setSelectedDate(dateStr)}
-                    className={`relative flex flex-col items-center rounded-lg p-2 text-sm transition-colors hover:bg-secondary ${
-                      isSelected ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""
-                    } ${isToday && !isSelected ? "ring-2 ring-primary/30" : ""}`}
-                  >
+                  <button key={day} onClick={() => setSelectedDate(dateStr)}
+                    className={`relative flex flex-col items-center rounded-lg p-2 text-sm transition-colors hover:bg-secondary ${isSelected ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""} ${isToday && !isSelected ? "ring-2 ring-primary/30" : ""}`}>
                     <span className="font-medium">{day}</span>
-                    {leaves.length > 0 && (
-                      <span className={`mt-0.5 text-[10px] ${isSelected ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                        {leaves.length}人
-                      </span>
-                    )}
+                    {leaves.length > 0 && <span className={`mt-0.5 text-[10px] ${isSelected ? "text-primary-foreground/80" : "text-muted-foreground"}`}>{leaves.length}人</span>}
                   </button>
                 );
               })}
@@ -103,18 +84,12 @@ export default function LeaveCalendar() {
           </CardContent>
         </Card>
 
-        {/* Leave list for selected date */}
         <Card className="glass-card">
           <CardHeader className="pb-3">
             <CardTitle className="text-base">{selectedDate} 休假清單</CardTitle>
             <div className="relative mt-2">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="搜尋員工..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-              />
+              <Input placeholder="搜尋員工..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9" />
             </div>
           </CardHeader>
           <CardContent>
@@ -126,19 +101,17 @@ export default function LeaveCalendar() {
                   <div key={r.id} className="rounded-lg border border-border p-3 space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-xs">
-                          {r.employeeName.charAt(0)}
-                        </div>
+                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-xs">{r.profile_name.charAt(0)}</div>
                         <div>
-                          <p className="font-medium text-sm">{r.employeeName}</p>
-                          <p className="text-xs text-muted-foreground">{r.department}</p>
+                          <p className="font-medium text-sm">{r.profile_name}</p>
+                          <p className="text-xs text-muted-foreground">{r.profile_department}</p>
                         </div>
                       </div>
-                      <StatusBadge status={r.status} />
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[r.status]}`}>{statusLabels[r.status]}</span>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <LeaveTypeBadge type={r.leaveType} />
-                      <span>{r.startDate} ~ {r.endDate}</span>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${leaveTypeColors[r.leave_type] ?? ""}`}>{r.leave_type}</span>
+                      <span>{r.start_date} ~ {r.end_date}</span>
                     </div>
                   </div>
                 ))}
