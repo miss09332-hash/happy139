@@ -15,3 +15,11 @@ export async function sendDailySummary() {
   if (error) throw error;
   return data;
 }
+
+export async function sendWeeklySummary() {
+  const { data, error } = await supabase.functions.invoke("send-line-message", {
+    body: { mode: "weekly-summary" },
+  });
+  if (error) throw error;
+  return data;
+}

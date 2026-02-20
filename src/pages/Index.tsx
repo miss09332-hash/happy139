@@ -17,7 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { fetchLeavesWithProfiles, LeaveWithProfile } from "@/lib/queries";
-import { sendDailySummary } from "@/lib/line";
+import { sendDailySummary, sendWeeklySummary } from "@/lib/line";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/10 text-warning",
