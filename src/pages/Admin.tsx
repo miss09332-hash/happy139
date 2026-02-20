@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchLeavesWithProfiles, LeaveWithProfile } from "@/lib/queries";
+import { sendDailySummary } from "@/lib/line";
 
 const statusColors: Record<string, string> = { pending: "bg-warning/10 text-warning", approved: "bg-success/10 text-success", rejected: "bg-destructive/10 text-destructive" };
 const statusLabels: Record<string, string> = { pending: "待審核", approved: "已核准", rejected: "已拒絕" };
@@ -53,7 +54,15 @@ export default function Admin() {
           <h1 className="text-2xl font-bold tracking-tight">管理後台</h1>
           <p className="text-muted-foreground mt-1">審核與管理休假申請</p>
         </div>
-        <Button variant="outline" className="gap-2" onClick={() => toast.success("每日休假提醒已發送至 LINE 群組")}>
+        <Button variant="outline" className="gap-2" onClick={async () => {
+          try {
+            toast.loading("正在發送每日提醒...", { id: "line-daily" });
+            await sendDailySummary();
+            toast.success("每日休假提醒已發送", { id: "line-daily" });
+          } catch (err: any) {
+            toast.error("發送失敗", { id: "line-daily", description: err.message });
+          }
+        }}>
           <Send className="h-4 w-4" />發送每日提醒
         </Button>
       </div>
