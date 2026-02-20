@@ -23,3 +23,11 @@ export async function sendWeeklySummary() {
   if (error) throw error;
   return data;
 }
+
+export async function sendLeaveBalanceReminder() {
+  const { data, error } = await supabase.functions.invoke("send-line-message", {
+    body: { mode: "leave-balance-reminder" },
+  });
+  if (error) throw error;
+  return data;
+}

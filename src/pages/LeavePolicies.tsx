@@ -16,6 +16,8 @@ interface LeavePolicy {
   default_days: number;
   description: string;
   is_active: boolean;
+  reminder_threshold_days: number;
+  reminder_enabled: boolean;
 }
 
 export default function LeavePolicies() {
@@ -23,7 +25,7 @@ export default function LeavePolicies() {
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LeavePolicy | null>(null);
-  const [form, setForm] = useState({ leave_type: "", default_days: 0, description: "" });
+  const [form, setForm] = useState({ leave_type: "", default_days: 0, description: "", reminder_threshold_days: 0, reminder_enabled: false });
 
   const { data: policies = [], isLoading } = useQuery({
     queryKey: ["leave-policies"],
@@ -38,17 +40,13 @@ export default function LeavePolicies() {
   });
 
   const upsert = useMutation({
-    mutationFn: async (values: { id?: string; leave_type: string; default_days: number; description: string }) => {
+    mutationFn: async (values: { id?: string; leave_type: string; default_days: number; description: string; reminder_threshold_days: number; reminder_enabled: boolean }) => {
+      const payload = { leave_type: values.leave_type, default_days: values.default_days, description: values.description, reminder_threshold_days: values.reminder_threshold_days, reminder_enabled: values.reminder_enabled };
       if (values.id) {
-        const { error } = await supabase
-          .from("leave_policies")
-          .update({ leave_type: values.leave_type, default_days: values.default_days, description: values.description })
-          .eq("id", values.id);
+        const { error } = await supabase.from("leave_policies").update(payload).eq("id", values.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase
-          .from("leave_policies")
-          .insert({ leave_type: values.leave_type, default_days: values.default_days, description: values.description });
+        const { error } = await supabase.from("leave_policies").insert(payload);
         if (error) throw error;
       }
     },
@@ -71,13 +69,13 @@ export default function LeavePolicies() {
 
   const openNew = () => {
     setEditing(null);
-    setForm({ leave_type: "", default_days: 7, description: "" });
+    setForm({ leave_type: "", default_days: 7, description: "", reminder_threshold_days: 0, reminder_enabled: false });
     setDialogOpen(true);
   };
 
   const openEdit = (p: LeavePolicy) => {
     setEditing(p);
-    setForm({ leave_type: p.leave_type, default_days: p.default_days, description: p.description });
+    setForm({ leave_type: p.leave_type, default_days: p.default_days, description: p.description, reminder_threshold_days: p.reminder_threshold_days, reminder_enabled: p.reminder_enabled });
     setDialogOpen(true);
   };
 
@@ -139,6 +137,22 @@ export default function LeavePolicies() {
                   placeholder="假別用途說明"
                 />
               </div>
+              <div className="space-y-2">
+                <Label>提醒門檻（已休天數達此值時提醒）</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={form.reminder_threshold_days}
+                  onChange={(e) => setForm((f) => ({ ...f, reminder_threshold_days: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <Label>啟用自動提醒</Label>
+                <Switch
+                  checked={form.reminder_enabled}
+                  onCheckedChange={(val) => setForm((f) => ({ ...f, reminder_enabled: val }))}
+                />
+              </div>
               <Button type="submit" className="w-full" disabled={upsert.isPending}>
                 {upsert.isPending ? "儲存中..." : "儲存"}
               </Button>
@@ -173,6 +187,9 @@ export default function LeavePolicies() {
               <CardContent>
                 <div className="text-3xl font-bold text-foreground">{p.default_days} <span className="text-sm font-normal text-muted-foreground">天/年</span></div>
                 <p className="text-sm text-muted-foreground mt-1">{p.description || "—"}</p>
+                {p.reminder_enabled && (
+                  <p className="text-xs text-amber-600 mt-2">🔔 已休 {p.reminder_threshold_days} 天時提醒</p>
+                )}
               </CardContent>
             </Card>
           ))}
