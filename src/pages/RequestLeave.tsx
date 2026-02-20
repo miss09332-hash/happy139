@@ -11,31 +11,46 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { employees, LeaveType } from "@/data/mockData";
 import { toast } from "sonner";
 import { Send, CalendarDays } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
 
-const leaveTypes: LeaveType[] = ["特休", "病假", "事假", "婚假", "產假", "喪假"];
+const leaveTypes = ["特休", "病假", "事假", "婚假", "產假", "喪假"] as const;
 
 export default function RequestLeave() {
+  const { user } = useAuth();
   const [form, setForm] = useState({
-    employeeId: "",
-    leaveType: "" as string,
+    leaveType: "",
     startDate: "",
     endDate: "",
     reason: "",
   });
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.employeeId || !form.leaveType || !form.startDate || !form.endDate) {
+    if (!form.leaveType || !form.startDate || !form.endDate) {
       toast.error("請填寫所有必要欄位");
       return;
     }
-    toast.success("休假申請已提交", {
-      description: "已同時發送 LINE 通知給主管",
-    });
-    setForm({ employeeId: "", leaveType: "", startDate: "", endDate: "", reason: "" });
+    setSubmitting(true);
+    try {
+      const { error } = await supabase.from("leave_requests").insert({
+        user_id: user!.id,
+        leave_type: form.leaveType,
+        start_date: form.startDate,
+        end_date: form.endDate,
+        reason: form.reason,
+      });
+      if (error) throw error;
+      toast.success("休假申請已提交");
+      setForm({ leaveType: "", startDate: "", endDate: "", reason: "" });
+    } catch (err: any) {
+      toast.error("提交失敗", { description: err.message });
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -55,23 +70,7 @@ export default function RequestLeave() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
-              <Label htmlFor="employee">員工</Label>
-              <Select value={form.employeeId} onValueChange={(v) => setForm({ ...form, employeeId: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="選擇員工" />
-                </SelectTrigger>
-                <SelectContent>
-                  {employees.map((e) => (
-                    <SelectItem key={e.id} value={e.id}>
-                      {e.name} - {e.department}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="leaveType">休假類型</Label>
+              <Label>休假類型</Label>
               <Select value={form.leaveType} onValueChange={(v) => setForm({ ...form, leaveType: v })}>
                 <SelectTrigger>
                   <SelectValue placeholder="選擇休假類型" />
@@ -86,29 +85,18 @@ export default function RequestLeave() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="startDate">開始日期</Label>
-                <Input
-                  id="startDate"
-                  type="date"
-                  value={form.startDate}
-                  onChange={(e) => setForm({ ...form, startDate: e.target.value })}
-                />
+                <Label>開始日期</Label>
+                <Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="endDate">結束日期</Label>
-                <Input
-                  id="endDate"
-                  type="date"
-                  value={form.endDate}
-                  onChange={(e) => setForm({ ...form, endDate: e.target.value })}
-                />
+                <Label>結束日期</Label>
+                <Input type="date" value={form.endDate} onChange={(e) => setForm({ ...form, endDate: e.target.value })} />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="reason">休假原因</Label>
+              <Label>休假原因</Label>
               <Textarea
-                id="reason"
                 placeholder="請填寫休假原因..."
                 value={form.reason}
                 onChange={(e) => setForm({ ...form, reason: e.target.value })}
@@ -116,9 +104,9 @@ export default function RequestLeave() {
               />
             </div>
 
-            <Button type="submit" className="w-full gap-2">
+            <Button type="submit" className="w-full gap-2" disabled={submitting}>
               <Send className="h-4 w-4" />
-              提交申請
+              {submitting ? "提交中..." : "提交申請"}
             </Button>
           </form>
         </CardContent>
