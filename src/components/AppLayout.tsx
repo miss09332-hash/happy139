@@ -5,6 +5,7 @@ import {
   Calendar,
   Settings,
   Bell,
+  ClipboardList,
   ChevronLeft,
   ChevronRight,
   Palmtree,
@@ -24,6 +25,7 @@ export default function AppLayout() {
     { to: "/request-leave", icon: FileText, label: "申請休假", show: true },
     { to: "/leave-calendar", icon: Calendar, label: "休假日曆", show: true },
     { to: "/admin", icon: Settings, label: "管理後台", show: isAdmin },
+    { to: "/leave-policies", icon: ClipboardList, label: "休假條件", show: isAdmin },
     { to: "/notification-settings", icon: Bell, label: "通知設置", show: isAdmin },
   ];
 

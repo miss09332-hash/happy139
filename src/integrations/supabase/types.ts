@@ -14,6 +14,36 @@ export type Database = {
   }
   public: {
     Tables: {
+      leave_policies: {
+        Row: {
+          created_at: string
+          default_days: number
+          description: string
+          id: string
+          is_active: boolean
+          leave_type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          default_days?: number
+          description?: string
+          id?: string
+          is_active?: boolean
+          leave_type: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          default_days?: number
+          description?: string
+          id?: string
+          is_active?: boolean
+          leave_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       leave_requests: {
         Row: {
           created_at: string
@@ -55,6 +85,7 @@ export type Database = {
           created_at: string
           department: string
           id: string
+          line_user_id: string | null
           name: string
           updated_at: string
           user_id: string
@@ -63,6 +94,7 @@ export type Database = {
           created_at?: string
           department?: string
           id?: string
+          line_user_id?: string | null
           name: string
           updated_at?: string
           user_id: string
@@ -71,6 +103,7 @@ export type Database = {
           created_at?: string
           department?: string
           id?: string
+          line_user_id?: string | null
           name?: string
           updated_at?: string
           user_id?: string
