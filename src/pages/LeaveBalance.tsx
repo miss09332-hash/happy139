@@ -6,22 +6,19 @@ import { sendLeaveBalanceReminder } from "@/lib/line";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { useToast } from "@/hooks/use-toast";
-import { Search, Bell, BarChart3 } from "lucide-react";
+import { Search, Bell, BarChart3, MessageCircle } from "lucide-react";
 
 interface EmployeeBalance {
   userId: string;
   name: string;
   department: string;
   hireDate: string | null;
+  lineBound: boolean;
   balances: { leaveType: string; total: number; used: number }[];
 }
 
@@ -61,7 +58,7 @@ export default function LeaveBalance() {
     queryFn: async () => {
       const { data: profiles, error: pErr } = await supabase
         .from("profiles")
-        .select("user_id, name, department, hire_date")
+        .select("user_id, name, department, hire_date, line_user_id")
         .order("name");
       if (pErr) throw pErr;
 
@@ -74,13 +71,11 @@ export default function LeaveBalance() {
         .lte("start_date", `${year}-12-31`);
       if (lErr) throw lErr;
 
-      // Build used days map: userId -> leaveType -> days
       const usedMap = new Map<string, Map<string, number>>();
       for (const l of leaves ?? []) {
-        const days =
-          Math.ceil(
-            (new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000
-          ) + 1;
+        const days = Math.ceil(
+          (new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000
+        ) + 1;
         if (!usedMap.has(l.user_id)) usedMap.set(l.user_id, new Map());
         const m = usedMap.get(l.user_id)!;
         m.set(l.leave_type, (m.get(l.leave_type) ?? 0) + days);
@@ -91,10 +86,9 @@ export default function LeaveBalance() {
         const userUsed = usedMap.get(p.user_id) ?? new Map<string, number>();
 
         const balances = (policies ?? []).map((pol) => {
-          const total =
-            pol.leave_type === "特休"
-              ? calculateAnnualLeaveDays(months, annualRules)
-              : pol.default_days;
+          const total = pol.leave_type === "特休"
+            ? calculateAnnualLeaveDays(months, annualRules)
+            : pol.default_days;
           return {
             leaveType: pol.leave_type,
             total,
@@ -107,6 +101,7 @@ export default function LeaveBalance() {
           name: p.name,
           department: p.department,
           hireDate: p.hire_date,
+          lineBound: !!p.line_user_id,
           balances,
         };
       });
@@ -114,8 +109,7 @@ export default function LeaveBalance() {
   });
 
   const filtered = employees.filter(
-    (e) =>
-      e.name.includes(search) || e.department.includes(search)
+    (e) => e.name.includes(search) || e.department.includes(search)
   );
 
   const getStatusColor = (used: number, total: number) => {
@@ -171,7 +165,7 @@ export default function LeaveBalance() {
 
       {/* Legend */}
       <Card>
-        <CardContent className="flex items-center gap-6 py-3">
+        <CardContent className="flex items-center gap-6 py-3 flex-wrap">
           <span className="text-sm text-muted-foreground">狀態說明：</span>
           <span className="flex items-center gap-1 text-sm text-emerald-600">● 正常</span>
           <span className="flex items-center gap-1 text-sm text-amber-600">● 即將用完 (≥80%)</span>
@@ -191,7 +185,13 @@ export default function LeaveBalance() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="sticky left-0 bg-background z-10">員工</TableHead>
-                  <TableHead className="sticky left-0 bg-background z-10">部門</TableHead>
+                  <TableHead>部門</TableHead>
+                  <TableHead className="text-center">
+                    <div className="flex items-center justify-center gap-1">
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      LINE
+                    </div>
+                  </TableHead>
                   {policies.map((p) => (
                     <TableHead key={p.id} className="text-center min-w-[100px]">
                       {p.leave_type}
@@ -202,8 +202,15 @@ export default function LeaveBalance() {
               <TableBody>
                 {filtered.map((emp) => (
                   <TableRow key={emp.userId}>
-                    <TableCell className="font-medium">{emp.name}</TableCell>
+                    <TableCell className="font-medium sticky left-0 bg-background">{emp.name}</TableCell>
                     <TableCell className="text-muted-foreground">{emp.department || "—"}</TableCell>
+                    <TableCell className="text-center">
+                      {emp.lineBound ? (
+                        <Badge variant="default" className="bg-emerald-500 text-xs">已綁定</Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-xs">未綁定</Badge>
+                      )}
+                    </TableCell>
                     {emp.balances.map((b, i) => (
                       <TableCell key={i} className={`text-center ${getStatusColor(b.used, b.total)}`}>
                         {b.used} / {b.total}
@@ -213,7 +220,7 @@ export default function LeaveBalance() {
                 ))}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={2 + policies.length} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={3 + policies.length} className="text-center text-muted-foreground py-8">
                       無符合條件的員工
                     </TableCell>
                   </TableRow>
