@@ -1,47 +1,84 @@
 
 
-# 特休天數個人化同步計畫
+# 三項改善計畫
 
-## 問題說明
+## 1. 休假條件管理 — 新增分類與排序功能
 
-目前 LINE Bot 在顯示假別選擇卡片時，特休顯示的天數來自 `leave_policies` 資料表的 `default_days`（固定值，例如 7 天），但每位員工的特休天數應根據入職日期（年資）動態計算。
+### 資料庫變更
+在 `leave_policies` 資料表新增兩個欄位：
+- `category` (text, 預設 '常用')：假別分類，例如「常用」、「特殊」
+- `sort_order` (integer, 預設 0)：控制同分類內的顯示順序
 
-查詢休假餘額的功能已經有正確的年資計算邏輯，但「申請休假」的假別選擇卡片沒有做同樣的處理。
+### 頁面改動 (`src/pages/LeavePolicies.tsx`)
+- 新增/編輯表單加入「分類」下拉選單（常用 / 特殊 / 其他，可自訂）和「排序」數字欄位
+- 卡片列表依分類分組顯示，每組有標題
+- 查詢時改用 `.order("category").order("sort_order")` 排序
+- 支援拖曳排序或上下箭頭按鈕調整順序
 
-## 解決方案
+---
 
-在顯示假別選擇卡片時，查詢該員工的 `hire_date` 和 `annual_leave_rules`，動態計算特休天數後再顯示於卡片上。
+## 2. Favicon 更換說明
 
-### 改動內容
+可以更換。只需提供一張新的圖片檔案（PNG、SVG 或 ICO 格式），上傳後我會將它替換到 `public/` 目錄並更新 `index.html` 的引用。
 
-修改 `supabase/functions/line-webhook/index.ts`：
+請上傳你想使用的 favicon 圖片，我就能幫你替換。
 
-1. **修改 `buildLeaveTypeCarousel` 函式**：新增一個可選參數 `annualDaysOverride`，當傳入時用來覆蓋特休的 `default_days` 顯示值
+---
 
-2. **修改「申請休假」指令處理**（約第 871 行）：
-   - 額外查詢 `annual_leave_rules`
-   - 利用員工的 `hire_date` 計算年資月數
-   - 算出該員工的實際特休天數
-   - 將計算結果傳入 `buildLeaveTypeCarousel`
+## 3. 表情符號全面替換為 Lucide Icon
 
-3. **同步修改「其他假別」卡片**（`buildOtherLeaveTypeCarousel` 和 `show_other_types` 處理）：同樣傳入個人化天數
+### 涉及檔案
 
-### 計算邏輯
+| 檔案 | 改動內容 |
+|------|----------|
+| `src/components/guide/AdminGuide.tsx` | 所有 emoji（⚙️📊📜👥🔔🎨🔐✅❌✏️🗑️🟢🟡🔴🔹👤🛡️）替換為對應 Lucide icon |
+| `src/components/guide/EmployeeGuide.tsx` | 所有 emoji（📝📋📅📱）替換為對應 Lucide icon |
+| `src/pages/LeavePolicies.tsx` | 🔔 替換為 `<Bell>` icon |
 
-重複利用已存在於餘額查詢中的年資計算邏輯：
-- 從 `profile.hire_date` 計算年資月數
-- 根據 `annual_leave_rules` 對照表找出對應天數
-- 未滿 6 個月：0 天
-- 10 年以上：基礎天數 + 每多 1 年加 1 天，上限 30 天
+### 對照表（部分）
 
-## 修改檔案
+| Emoji | Lucide Icon |
+|-------|-------------|
+| ⚙️ | `Settings` |
+| 📊 | `BarChart3` |
+| 📜 | `ScrollText` |
+| 👥 | `Users` |
+| 🔔 | `Bell` |
+| 🎨 | `Palette` |
+| 🔐 | `Lock` |
+| ✅ | `Check` |
+| ❌ | `X` |
+| ✏️ | `Pencil` |
+| 🗑️ | `Trash2` |
+| 🟢🟡🔴 | 保留彩色圓點 `<span>` (已是 HTML) |
+| 🔹 | `ChevronRight` |
+| 👤 | `User` |
+| 🛡️ | `Shield` |
+| 📝 | `FileEdit` |
+| 📋 | `ClipboardList` |
+| 📅 | `Calendar` |
+| 📱 | `Smartphone` |
 
-| 檔案 | 改動 |
-|------|------|
-| `supabase/functions/line-webhook/index.ts` | 假別卡片顯示個人化特休天數 |
+Section 的 `title` 屬性中的 emoji 前綴會被移除，因為 Section 已經有 `icon` prop 顯示圖示。
+
+---
 
 ## 技術細節
 
-- 將年資計算邏輯抽取為一個共用函式 `calculateAnnualDays(hireDate, rules)`，避免在餘額查詢和卡片顯示中重複撰寫
-- `buildLeaveTypeCarousel(policies, annualDaysOverride?)` 當 `annualDaysOverride` 有值且假別為「特休」時，顯示個人化天數
-- 同樣套用到 `buildOtherLeaveTypeCarousel`
+### 資料庫 Migration SQL
+```sql
+ALTER TABLE public.leave_policies
+  ADD COLUMN category text NOT NULL DEFAULT '常用',
+  ADD COLUMN sort_order integer NOT NULL DEFAULT 0;
+```
+
+### LeavePolicies.tsx 主要變更
+- 表單新增 `category`（Select 元件）和 `sort_order`（Input number）
+- 查詢改為 `.order("category").order("sort_order")`
+- 渲染時按 `category` 分組，每組顯示分組標題
+- 每張卡片新增上移/下移按鈕，點擊後交換相鄰項目的 `sort_order` 值
+
+### Guide 檔案變更
+- 移除 Section title 中的 emoji 前綴（icon prop 已負責圖示）
+- 內文中的 emoji 替換為對應的 inline Lucide icon（`<Icon className="h-4 w-4 inline" />`）
+
