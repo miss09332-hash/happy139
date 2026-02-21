@@ -12,6 +12,7 @@ import {
   Palmtree,
   LogOut,
   BarChart3,
+  BookOpen,
   Menu,
   X,
 } from "lucide-react";
@@ -36,6 +37,7 @@ export default function AppLayout() {
     { to: "/leave-policies", icon: ClipboardList, label: "休假條件", show: isAdmin },
     { to: "/employee-management", icon: Users, label: "員工管理", show: isAdmin },
     { to: "/notification-settings", icon: Bell, label: "通知設置", show: isAdmin },
+    { to: "/user-guide", icon: BookOpen, label: "操作指南", show: true },
   ];
 
   const sidebarContent = (

@@ -12,6 +12,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -19,9 +29,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Users, Pencil } from "lucide-react";
+import { Users, Pencil, ShieldCheck, ShieldOff } from "lucide-react";
 import { getMonthsOfService, calculateAnnualLeaveDays } from "@/lib/leaveCalculation";
+import { useAuth } from "@/hooks/useAuth";
 
 interface Profile {
   id: string;
@@ -37,10 +49,17 @@ interface AnnualLeaveRule {
   days: number;
 }
 
+interface UserRole {
+  user_id: string;
+  role: string;
+}
+
 export default function EmployeeManagement() {
   const qc = useQueryClient();
+  const { user } = useAuth();
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
   const [form, setForm] = useState({ department: "", hire_date: "" });
+  const [roleConfirm, setRoleConfirm] = useState<{ profile: Profile; action: "promote" | "demote" } | null>(null);
 
   const { data: profiles = [], isLoading } = useQuery({
     queryKey: ["all-profiles"],
@@ -66,6 +85,20 @@ export default function EmployeeManagement() {
     },
   });
 
+  const { data: userRoles = [] } = useQuery({
+    queryKey: ["all-user-roles"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("user_roles")
+        .select("user_id, role");
+      if (error) throw error;
+      return data as UserRole[];
+    },
+  });
+
+  const isUserAdmin = (userId: string) =>
+    userRoles.some((r) => r.user_id === userId && r.role === "admin");
+
   const updateProfile = useMutation({
     mutationFn: async ({ id, department, hire_date }: { id: string; department: string; hire_date: string }) => {
       const { error } = await supabase
@@ -82,6 +115,38 @@ export default function EmployeeManagement() {
     onError: (e: Error) => toast.error("更新失敗", { description: e.message }),
   });
 
+  const promoteToAdmin = useMutation({
+    mutationFn: async (userId: string) => {
+      const { error } = await supabase
+        .from("user_roles")
+        .insert({ user_id: userId, role: "admin" as any });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["all-user-roles"] });
+      toast.success("已升級為管理員");
+      setRoleConfirm(null);
+    },
+    onError: (e: Error) => toast.error("操作失敗", { description: e.message }),
+  });
+
+  const demoteFromAdmin = useMutation({
+    mutationFn: async (userId: string) => {
+      const { error } = await supabase
+        .from("user_roles")
+        .delete()
+        .eq("user_id", userId)
+        .eq("role", "admin" as any);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["all-user-roles"] });
+      toast.success("已降為一般員工");
+      setRoleConfirm(null);
+    },
+    onError: (e: Error) => toast.error("操作失敗", { description: e.message }),
+  });
+
   const openEdit = (p: Profile) => {
     setEditingProfile(p);
     setForm({ department: p.department, hire_date: p.hire_date || "" });
@@ -91,6 +156,15 @@ export default function EmployeeManagement() {
     e.preventDefault();
     if (!editingProfile) return;
     updateProfile.mutate({ id: editingProfile.id, ...form });
+  };
+
+  const handleRoleConfirm = () => {
+    if (!roleConfirm) return;
+    if (roleConfirm.action === "promote") {
+      promoteToAdmin.mutate(roleConfirm.profile.user_id);
+    } else {
+      demoteFromAdmin.mutate(roleConfirm.profile.user_id);
+    }
   };
 
   const getEmployeeInfo = (p: Profile) => {
@@ -110,7 +184,7 @@ export default function EmployeeManagement() {
         </div>
         <div>
           <h1 className="text-2xl font-bold text-foreground">員工管理</h1>
-          <p className="text-sm text-muted-foreground">管理員工入職日期與部門資訊</p>
+          <p className="text-sm text-muted-foreground">管理員工入職日期、部門資訊與角色</p>
         </div>
       </div>
 
@@ -130,12 +204,15 @@ export default function EmployeeManagement() {
                   <TableHead>入職日期</TableHead>
                   <TableHead>年資</TableHead>
                   <TableHead>特休天數</TableHead>
+                  <TableHead>角色</TableHead>
                   <TableHead className="w-16">操作</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {profiles.map((p) => {
                   const info = getEmployeeInfo(p);
+                  const admin = isUserAdmin(p.user_id);
+                  const isSelf = p.user_id === user?.id;
                   return (
                     <TableRow key={p.id}>
                       <TableCell className="font-medium">{p.name}</TableCell>
@@ -146,6 +223,33 @@ export default function EmployeeManagement() {
                         {info.annualDays !== null ? (
                           <span className="font-semibold text-primary">{info.annualDays} 天</span>
                         ) : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={admin ? "default" : "secondary"}>
+                            {admin ? "管理員" : "員工"}
+                          </Badge>
+                          {!isSelf && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              title={admin ? "降為員工" : "升為管理員"}
+                              onClick={() =>
+                                setRoleConfirm({
+                                  profile: p,
+                                  action: admin ? "demote" : "promote",
+                                })
+                              }
+                            >
+                              {admin ? (
+                                <ShieldOff className="h-4 w-4 text-destructive" />
+                              ) : (
+                                <ShieldCheck className="h-4 w-4 text-primary" />
+                              )}
+                            </Button>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
@@ -161,6 +265,7 @@ export default function EmployeeManagement() {
         </CardContent>
       </Card>
 
+      {/* Edit profile dialog */}
       <Dialog open={!!editingProfile} onOpenChange={(open) => !open && setEditingProfile(null)}>
         <DialogContent>
           <DialogHeader>
@@ -189,6 +294,28 @@ export default function EmployeeManagement() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Role change confirmation */}
+      <AlertDialog open={!!roleConfirm} onOpenChange={(open) => !open && setRoleConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              確認{roleConfirm?.action === "promote" ? "升級" : "降級"}角色？
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {roleConfirm?.action === "promote"
+                ? `確定要將「${roleConfirm?.profile.name}」升級為管理員嗎？升級後該員工將擁有管理後台的所有權限。`
+                : `確定要將「${roleConfirm?.profile.name}」降為一般員工嗎？降級後該員工將無法存取管理功能。`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction onClick={handleRoleConfirm}>
+              確認{roleConfirm?.action === "promote" ? "升級" : "降級"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
