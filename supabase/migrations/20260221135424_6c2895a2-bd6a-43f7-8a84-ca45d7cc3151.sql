@@ -1,0 +1,1 @@
+ALTER TABLE public.leave_requests DROP CONSTRAINT leave_requests_leave_type_check;
