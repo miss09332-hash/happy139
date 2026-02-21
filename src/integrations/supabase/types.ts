@@ -40,6 +40,7 @@ export type Database = {
       }
       leave_policies: {
         Row: {
+          category: string
           created_at: string
           default_days: number
           description: string
@@ -48,9 +49,11 @@ export type Database = {
           leave_type: string
           reminder_enabled: boolean | null
           reminder_threshold_days: number | null
+          sort_order: number
           updated_at: string
         }
         Insert: {
+          category?: string
           created_at?: string
           default_days?: number
           description?: string
@@ -59,9 +62,11 @@ export type Database = {
           leave_type: string
           reminder_enabled?: boolean | null
           reminder_threshold_days?: number | null
+          sort_order?: number
           updated_at?: string
         }
         Update: {
+          category?: string
           created_at?: string
           default_days?: number
           description?: string
@@ -70,6 +75,7 @@ export type Database = {
           leave_type?: string
           reminder_enabled?: boolean | null
           reminder_threshold_days?: number | null
+          sort_order?: number
           updated_at?: string
         }
         Relationships: []

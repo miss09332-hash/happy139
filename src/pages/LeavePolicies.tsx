@@ -7,8 +7,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Palmtree } from "lucide-react";
+import { Plus, Pencil, Palmtree, Bell, ArrowUp, ArrowDown } from "lucide-react";
 
 interface LeavePolicy {
   id: string;
@@ -18,14 +19,18 @@ interface LeavePolicy {
   is_active: boolean;
   reminder_threshold_days: number;
   reminder_enabled: boolean;
+  category: string;
+  sort_order: number;
 }
+
+const CATEGORIES = ["常用", "特殊", "其他"];
 
 export default function LeavePolicies() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LeavePolicy | null>(null);
-  const [form, setForm] = useState({ leave_type: "", default_days: 0, description: "", reminder_threshold_days: 0, reminder_enabled: false });
+  const [form, setForm] = useState({ leave_type: "", default_days: 0, description: "", reminder_threshold_days: 0, reminder_enabled: false, category: "常用", sort_order: 0 });
 
   const { data: policies = [], isLoading } = useQuery({
     queryKey: ["leave-policies"],
@@ -33,15 +38,16 @@ export default function LeavePolicies() {
       const { data, error } = await supabase
         .from("leave_policies")
         .select("*")
-        .order("leave_type");
+        .order("category")
+        .order("sort_order");
       if (error) throw error;
       return data as LeavePolicy[];
     },
   });
 
   const upsert = useMutation({
-    mutationFn: async (values: { id?: string; leave_type: string; default_days: number; description: string; reminder_threshold_days: number; reminder_enabled: boolean }) => {
-      const payload = { leave_type: values.leave_type, default_days: values.default_days, description: values.description, reminder_threshold_days: values.reminder_threshold_days, reminder_enabled: values.reminder_enabled };
+    mutationFn: async (values: { id?: string; leave_type: string; default_days: number; description: string; reminder_threshold_days: number; reminder_enabled: boolean; category: string; sort_order: number }) => {
+      const payload = { leave_type: values.leave_type, default_days: values.default_days, description: values.description, reminder_threshold_days: values.reminder_threshold_days, reminder_enabled: values.reminder_enabled, category: values.category, sort_order: values.sort_order };
       if (values.id) {
         const { error } = await supabase.from("leave_policies").update(payload).eq("id", values.id);
         if (error) throw error;
@@ -67,15 +73,25 @@ export default function LeavePolicies() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["leave-policies"] }),
   });
 
+  const swapOrder = useMutation({
+    mutationFn: async ({ a, b }: { a: LeavePolicy; b: LeavePolicy }) => {
+      const { error: e1 } = await supabase.from("leave_policies").update({ sort_order: b.sort_order }).eq("id", a.id);
+      if (e1) throw e1;
+      const { error: e2 } = await supabase.from("leave_policies").update({ sort_order: a.sort_order }).eq("id", b.id);
+      if (e2) throw e2;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["leave-policies"] }),
+  });
+
   const openNew = () => {
     setEditing(null);
-    setForm({ leave_type: "", default_days: 7, description: "", reminder_threshold_days: 0, reminder_enabled: false });
+    setForm({ leave_type: "", default_days: 7, description: "", reminder_threshold_days: 0, reminder_enabled: false, category: "常用", sort_order: 0 });
     setDialogOpen(true);
   };
 
   const openEdit = (p: LeavePolicy) => {
     setEditing(p);
-    setForm({ leave_type: p.leave_type, default_days: p.default_days, description: p.description, reminder_threshold_days: p.reminder_threshold_days, reminder_enabled: p.reminder_enabled });
+    setForm({ leave_type: p.leave_type, default_days: p.default_days, description: p.description, reminder_threshold_days: p.reminder_threshold_days, reminder_enabled: p.reminder_enabled, category: p.category, sort_order: p.sort_order });
     setDialogOpen(true);
   };
 
@@ -87,6 +103,24 @@ export default function LeavePolicies() {
   const leaveTypeColors: Record<string, string> = {
     "特休": "bg-blue-500", "病假": "bg-red-500", "事假": "bg-amber-500",
     "婚假": "bg-violet-500", "產假": "bg-cyan-500", "喪假": "bg-gray-500",
+  };
+
+  // Group policies by category
+  const grouped = policies.reduce<Record<string, LeavePolicy[]>>((acc, p) => {
+    const cat = p.category || "常用";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(p);
+    return acc;
+  }, {});
+
+  const handleMoveUp = (catPolicies: LeavePolicy[], index: number) => {
+    if (index === 0) return;
+    swapOrder.mutate({ a: catPolicies[index], b: catPolicies[index - 1] });
+  };
+
+  const handleMoveDown = (catPolicies: LeavePolicy[], index: number) => {
+    if (index >= catPolicies.length - 1) return;
+    swapOrder.mutate({ a: catPolicies[index], b: catPolicies[index + 1] });
   };
 
   return (
@@ -118,6 +152,30 @@ export default function LeavePolicies() {
                   placeholder="例如：特休"
                   required
                 />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>分類</Label>
+                  <Select value={form.category} onValueChange={(val) => setForm((f) => ({ ...f, category: val }))}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CATEGORIES.map((c) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>排序</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={form.sort_order}
+                    onChange={(e) => setForm((f) => ({ ...f, sort_order: Number(e.target.value) }))}
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>年度天數</Label>
@@ -164,34 +222,49 @@ export default function LeavePolicies() {
       {isLoading ? (
         <div className="text-center py-12 text-muted-foreground">載入中...</div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {policies.map((p) => (
-            <Card key={p.id} className={`transition-opacity ${!p.is_active ? "opacity-50" : ""}`}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className={`inline-block w-3 h-3 rounded-full ${leaveTypeColors[p.leave_type] ?? "bg-muted-foreground"}`} />
-                    <CardTitle className="text-lg">{p.leave_type}</CardTitle>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Switch
-                      checked={p.is_active}
-                      onCheckedChange={(val) => toggleActive.mutate({ id: p.id, is_active: val })}
-                    />
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-3xl font-bold text-foreground">{p.default_days} <span className="text-sm font-normal text-muted-foreground">天/年</span></div>
-                <p className="text-sm text-muted-foreground mt-1">{p.description || "—"}</p>
-                {p.reminder_enabled && (
-                  <p className="text-xs text-amber-600 mt-2">🔔 已休 {p.reminder_threshold_days} 天時提醒</p>
-                )}
-              </CardContent>
-            </Card>
+        <div className="space-y-8">
+          {Object.entries(grouped).map(([category, catPolicies]) => (
+            <div key={category}>
+              <h2 className="text-lg font-semibold text-foreground mb-3 border-b pb-2">{category}</h2>
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {catPolicies.map((p, idx) => (
+                  <Card key={p.id} className={`transition-opacity ${!p.is_active ? "opacity-50" : ""}`}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block w-3 h-3 rounded-full ${leaveTypeColors[p.leave_type] ?? "bg-muted-foreground"}`} />
+                          <CardTitle className="text-lg">{p.leave_type}</CardTitle>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleMoveUp(catPolicies, idx)} disabled={idx === 0}>
+                            <ArrowUp className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleMoveDown(catPolicies, idx)} disabled={idx >= catPolicies.length - 1}>
+                            <ArrowDown className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Switch
+                            checked={p.is_active}
+                            onCheckedChange={(val) => toggleActive.mutate({ id: p.id, is_active: val })}
+                          />
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-3xl font-bold text-foreground">{p.default_days} <span className="text-sm font-normal text-muted-foreground">天/年</span></div>
+                      <p className="text-sm text-muted-foreground mt-1">{p.description || "—"}</p>
+                      {p.reminder_enabled && (
+                        <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                          <Bell className="h-3.5 w-3.5" /> 已休 {p.reminder_threshold_days} 天時提醒
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
           ))}
         </div>
       )}

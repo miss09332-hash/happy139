@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 export default function EmployeeGuide() {
   return (
     <div className="space-y-4">
-      <Section icon={LogIn} title="📝 註冊與登入">
+      <Section icon={LogIn} title="註冊與登入">
         <Step n={1}>打開系統網址，會看到登入畫面。</Step>
         <Step n={2}>第一次使用？點上方的「<b>註冊</b>」分頁。</Step>
         <Step n={3}>
@@ -29,7 +29,7 @@ export default function EmployeeGuide() {
         </Tip>
       </Section>
 
-      <Section icon={FileText} title="📋 申請休假">
+      <Section icon={FileText} title="申請休假">
         <Step n={1}>點左邊選單的「<b>申請休假</b>」。</Step>
         <Step n={2}>選擇<b>假別</b>（參考下方表格）。</Step>
         <Step n={3}>用日曆選擇<b>開始日期</b>和<b>結束日期</b>。</Step>
@@ -57,7 +57,7 @@ export default function EmployeeGuide() {
         <Tip>假單還在「待審核」狀態時，可以在首頁點垃圾桶圖示刪除。</Tip>
       </Section>
 
-      <Section icon={Calendar} title="📅 休假日曆">
+      <Section icon={Calendar} title="休假日曆">
         <Step n={1}>點左邊選單的「<b>休假日曆</b>」。</Step>
         <Step n={2}>日曆上會顯示所有人的休假狀況，用不同顏色區分。</Step>
         <Step n={3}>紅色的日期是<b>國定假日</b>，不用上班！</Step>
@@ -72,7 +72,7 @@ export default function EmployeeGuide() {
         </div>
       </Section>
 
-      <Section icon={MessageCircle} title="📱 LINE 功能">
+      <Section icon={MessageCircle} title="LINE 功能">
         <p className="font-medium mb-2 flex items-center gap-1.5"><Smartphone className="h-4 w-4 text-primary" /> 如何綁定 LINE：</p>
         <Step n={1}>加入公司的 LINE 官方帳號為好友。</Step>
         <Step n={2}>在聊天視窗輸入「<CommandBadge>綁定 你的Email</CommandBadge>」（例如：綁定 wang@company.com）。</Step>
