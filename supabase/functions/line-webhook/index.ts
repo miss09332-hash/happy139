@@ -12,7 +12,6 @@ async function getState(supabase: any, lineUserId: string) {
     .eq("line_user_id", lineUserId)
     .maybeSingle();
   if (!data) return null;
-  // Expire after 30 minutes
   const updatedAt = new Date(data.updated_at).getTime();
   if (Date.now() - updatedAt > 30 * 60 * 1000) {
     await clearState(supabase, lineUserId);
@@ -36,6 +35,8 @@ async function clearState(supabase: any, lineUserId: string) {
 
 // ===== Helpers =====
 
+const COMMON_LEAVE_TYPES = ["特休", "病假", "事假"];
+
 function getLeaveTypeColor(type: string): string {
   const colors: Record<string, string> = {
     "特休": "#3B82F6", "病假": "#EF4444", "事假": "#F59E0B",
@@ -55,7 +56,81 @@ function replyMessage(replyToken: string, token: string, messages: object[]) {
 // ===== Flex Builders =====
 
 function buildLeaveTypeCarousel(policies: any[]): object {
-  const bubbles = policies.map((p) => ({
+  const commonPolicies = policies.filter(p => COMMON_LEAVE_TYPES.includes(p.leave_type));
+  const otherPolicies = policies.filter(p => !COMMON_LEAVE_TYPES.includes(p.leave_type));
+
+  const bubbles = commonPolicies.map((p) => ({
+    type: "bubble",
+    size: "micro",
+    header: {
+      type: "box", layout: "vertical",
+      contents: [{ type: "text", text: p.leave_type, size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
+      backgroundColor: getLeaveTypeColor(p.leave_type),
+      paddingAll: "lg",
+    },
+    body: {
+      type: "box", layout: "vertical",
+      contents: [
+        { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
+        { type: "text", text: `年度 ${p.default_days} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+      ],
+      paddingAll: "lg",
+    },
+    footer: {
+      type: "box", layout: "vertical",
+      contents: [{
+        type: "button",
+        action: { type: "postback", label: "選擇", data: `action=select_leave&type=${p.leave_type}` },
+        style: "primary",
+        color: getLeaveTypeColor(p.leave_type),
+        height: "sm",
+      }],
+      paddingAll: "sm",
+    },
+  }));
+
+  // Add "其他假別" card if there are other types
+  if (otherPolicies.length > 0) {
+    bubbles.push({
+      type: "bubble",
+      size: "micro",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [{ type: "text", text: "其他假別", size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
+        backgroundColor: "#9CA3AF",
+        paddingAll: "lg",
+      },
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: `包含${otherPolicies.map(p => p.leave_type).join("、")}`, size: "xs", color: "#888888", wrap: true },
+          { type: "text", text: `共 ${otherPolicies.length} 種`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical",
+        contents: [{
+          type: "button",
+          action: { type: "postback", label: "查看更多", data: "action=show_other_types" },
+          style: "primary",
+          color: "#9CA3AF",
+          height: "sm",
+        }],
+        paddingAll: "sm",
+      },
+    });
+  }
+
+  return {
+    type: "flex", altText: "請選擇假別",
+    contents: { type: "carousel", contents: bubbles.slice(0, 10) },
+  };
+}
+
+function buildOtherLeaveTypeCarousel(policies: any[]): object {
+  const otherPolicies = policies.filter(p => !COMMON_LEAVE_TYPES.includes(p.leave_type));
+  const bubbles = otherPolicies.map((p) => ({
     type: "bubble",
     size: "micro",
     header: {
@@ -85,7 +160,7 @@ function buildLeaveTypeCarousel(policies: any[]): object {
     },
   }));
   return {
-    type: "flex", altText: "請選擇假別",
+    type: "flex", altText: "其他假別",
     contents: { type: "carousel", contents: bubbles.slice(0, 10) },
   };
 }
@@ -192,6 +267,49 @@ function buildEndDatePicker(leaveType: string, startDate: string): object {
   };
 }
 
+function buildReasonPrompt(leaveType: string, startDate: string, endDate: string): object {
+  return {
+    type: "flex", altText: `${leaveType} - 填寫原因`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: `📝 ${leaveType} - 填寫原因`, size: "lg", color: "#FFFFFF", weight: "bold" },
+        ],
+        backgroundColor: getLeaveTypeColor(leaveType),
+        paddingAll: "lg",
+      },
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          buildInfoRow("開始", startDate),
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          buildInfoRow("結束", endDate),
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "text", text: "請輸入休假原因", size: "sm", color: "#555555", margin: "lg" },
+          { type: "text", text: "直接輸入文字即可", size: "xxs", color: "#AAAAAA", margin: "xs" },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [
+          {
+            type: "button", style: "primary", color: "#10B981",
+            action: { type: "postback", label: "📌 不填原因，直接送出", data: `action=skip_reason&type=${leaveType}&start=${startDate}&end=${endDate}` },
+          },
+          {
+            type: "button", style: "secondary",
+            action: { type: "postback", label: "❌ 取消", data: "action=cancel_leave" },
+          },
+        ],
+        paddingAll: "sm",
+      },
+    },
+  };
+}
+
 function buildSuccessBubble(leaveType: string, startDate: string, endDate: string, reason: string): object {
   return {
     type: "flex", altText: "休假申請成功！",
@@ -270,13 +388,13 @@ function buildBalanceBubble(balances: { type: string; total: number; used: numbe
   });
 
   return {
-    type: "flex", altText: "假期餘額查詢",
+    type: "flex", altText: "休假餘額查詢",
     contents: {
       type: "bubble", size: "mega",
       header: {
         type: "box", layout: "vertical",
         contents: [
-          { type: "text", text: "🏖️ 假期餘額", size: "xl", color: "#FFFFFF", weight: "bold" },
+          { type: "text", text: "🏖️ 休假餘額", size: "xl", color: "#FFFFFF", weight: "bold" },
           { type: "text", text: `${new Date().getFullYear()} 年度`, size: "xs", color: "#FFFFFFCC", margin: "xs" },
         ],
         backgroundColor: "#3B82F6",
@@ -537,6 +655,13 @@ async function submitLeaveRequest(
             { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
             { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
           ]},
+          ...(reason ? [
+            { type: "separator", margin: "md", color: "#F0F0F0" },
+            { type: "box", layout: "horizontal", margin: "md", contents: [
+              { type: "text", text: "原因", size: "sm", color: "#AAAAAA", flex: 2 },
+              { type: "text", text: reason, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+            ]},
+          ] : []),
         ]},
         footer: { type: "box", layout: "vertical", contents: [
           { type: "text", text: "⏳ 請前往後台審核", size: "xs", color: "#F59E0B", align: "center" },
@@ -596,6 +721,21 @@ serve(async (req) => {
           continue;
         }
 
+        // Show other leave types
+        if (action === "show_other_types") {
+          const { data: policies } = await supabase
+            .from("leave_policies")
+            .select("*")
+            .eq("is_active", true)
+            .order("leave_type");
+          if (!policies?.length) {
+            await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("⚠️ 目前無其他假別。")]);
+            continue;
+          }
+          await replyMessage(replyToken, LINE_TOKEN, [buildOtherLeaveTypeCarousel(policies)]);
+          continue;
+        }
+
         // Step 1: User selected leave type → show start date picker
         if (action === "select_leave") {
           const leaveType = params.get("type")!;
@@ -617,7 +757,7 @@ serve(async (req) => {
           continue;
         }
 
-        // Step 3a: User picked end date via datetime picker → submit
+        // Step 3a: User picked end date → show reason prompt
         if (action === "pick_end_date") {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
@@ -626,15 +766,26 @@ serve(async (req) => {
             await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("❌ 無法取得日期，請重試。")]);
             continue;
           }
-          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, "", replyToken, LINE_TOKEN);
+          await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate });
+          await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, endDate)]);
           continue;
         }
 
-        // Step 3b: Same day shortcut → submit
+        // Step 3b: Same day shortcut → show reason prompt
         if (action === "same_day") {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
-          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, startDate, "", replyToken, LINE_TOKEN);
+          await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate: startDate });
+          await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, startDate)]);
+          continue;
+        }
+
+        // Step 4: Skip reason → submit directly
+        if (action === "skip_reason") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          const endDate = params.get("end")!;
+          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, "", replyToken, LINE_TOKEN);
           continue;
         }
 
@@ -658,7 +809,7 @@ serve(async (req) => {
             if (matchedUser) {
               await supabase.from("profiles").update({ line_user_id: userId }).eq("user_id", matchedUser.id);
               await replyMessage(replyToken, LINE_TOKEN, [
-                buildTextMessage(`✅ 綁定成功！歡迎使用休假系統。\n\n您可以傳送：\n📝 申請休假\n📊 查詢假期\n📆 當月休假`),
+                buildTextMessage(`✅ 綁定成功！歡迎使用休假系統。\n\n您可以透過下方選單操作，或傳送：\n📝 申請休假\n📊 查詢休假\n📆 當月休假`),
               ]);
             } else {
               await replyMessage(replyToken, LINE_TOKEN, [
@@ -671,7 +822,7 @@ serve(async (req) => {
           continue;
         }
 
-        // Check if user is in a conversation state (fallback text date input)
+        // Check if user is in a conversation state
         const state = await getState(supabase, userId);
 
         // Cancel command
@@ -685,19 +836,31 @@ serve(async (req) => {
           continue;
         }
 
+        // Handle await_reason state: user typing reason text
+        if (state?.step === "await_reason") {
+          const { leaveType, startDate, endDate } = state.data;
+          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, text, replyToken, LINE_TOKEN);
+          continue;
+        }
+
         // Fallback: text date input while in leave flow
         if (state?.step === "await_start_date" || state?.step === "await_end_date") {
           const leaveType = state.data.leaveType;
-          // Parse: "2026-03-01" or "2026-03-01~2026-03-03" optionally followed by reason
           const dateMatch = text.match(/^(\d{4}-\d{2}-\d{2})(?:\s*[~～\-至到]\s*(\d{4}-\d{2}-\d{2}))?(?:\s+(.+))?$/);
           if (dateMatch) {
             const startDate = state.step === "await_end_date" ? (state.data.startDate || dateMatch[1]) : dateMatch[1];
             const endDate = dateMatch[2] || (state.step === "await_end_date" ? dateMatch[1] : dateMatch[1]);
             const reason = dateMatch[3] || "";
-            await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, reason, replyToken, LINE_TOKEN);
+            if (reason) {
+              // User provided reason inline with date, submit directly
+              await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, reason, replyToken, LINE_TOKEN);
+            } else {
+              // No reason provided, go to reason step
+              await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate });
+              await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, endDate)]);
+            }
             continue;
           }
-          // Not a valid date, remind
           await replyMessage(replyToken, LINE_TOKEN, [
             buildTextMessage("❌ 日期格式不正確。\n請使用日期選擇器，或輸入格式：2026-03-01\n\n傳送「取消」可放棄申請。"),
           ]);
@@ -719,7 +882,7 @@ serve(async (req) => {
           continue;
         }
 
-        if (text.includes("查詢假期")) {
+        if (text.includes("查詢休假") || text.includes("查詢假期") || text.includes("假期餘額") || text.includes("休假餘額")) {
           const { data: policies } = await supabase
             .from("leave_policies")
             .select("*")
@@ -836,18 +999,18 @@ serve(async (req) => {
           continue;
         }
 
-        // Default help with Quick Reply
+        // Default reply: guide to Rich Menu
         const APP_URL = "https://id-preview--c01a8d7a-ca4a-4296-b0f5-7ae0f33dd9b2.lovable.app";
         await replyMessage(replyToken, LINE_TOKEN, [{
           type: "text",
-          text: "👋 您好！請選擇功能：",
+          text: "👋 請使用下方圖文選單操作休假功能。\n\n若選單未顯示，也可輸入以下指令：\n📝 申請休假\n📊 查詢休假\n📋 休假明細\n📆 當月休假",
           quickReply: {
             items: [
               { type: "action", action: { type: "message", label: "📝 申請休假", text: "申請休假" } },
-              { type: "action", action: { type: "message", label: "📊 查詢假期", text: "查詢假期" } },
+              { type: "action", action: { type: "message", label: "📊 查詢休假", text: "查詢休假" } },
               { type: "action", action: { type: "message", label: "📋 休假明細", text: "休假明細" } },
               { type: "action", action: { type: "message", label: "📆 當月休假", text: "當月休假" } },
-              { type: "action", action: { type: "uri", label: "🌐 網頁版請假", uri: `${APP_URL}/request-leave` } },
+              { type: "action", action: { type: "uri", label: "🌐 網頁版", uri: `${APP_URL}/request-leave` } },
             ],
           },
         }]);
