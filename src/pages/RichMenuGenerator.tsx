@@ -9,15 +9,46 @@ const HALF_H = CANVAS_H / 2;
 const HALF_W = CANVAS_W / 2;
 const THIRD_W = Math.floor(CANVAS_W / 3);
 
+// Lucide icon SVG paths (24x24 viewBox, stroke-based)
+const ICON_PATHS: Record<string, string[]> = {
+  filePen: [
+    "M4 13.5V4a2 2 0 0 1 2-2h8.5L20 7.5V20a2 2 0 0 1-2 2h-5.5",
+    "M14 2v6h6",
+    "M10.42 12.61a2.1 2.1 0 1 1 2.97 2.97L7.95 21 4 22l1-3.95z",
+  ],
+  barChart3: [
+    "M3 3v18h18",
+    "M18 17V9", "M13 17V5", "M8 17v-3",
+  ],
+  calendarDays: [
+    "M8 2v4", "M16 2v4",
+    "M3 10h18",
+    "M3 6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z",
+    "M8 14h.01", "M12 14h.01", "M16 14h.01",
+    "M8 18h.01", "M12 18h.01", "M16 18h.01",
+  ],
+  clipboardList: [
+    "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
+    "M9 2h6a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z",
+    "M12 11h4", "M12 16h4",
+    "M8 11h.01", "M8 16h.01",
+  ],
+  globe: [
+    "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z",
+    "M2 12h20",
+    "M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z",
+  ],
+};
+
 const topCells = [
-  { label: "申請休假", emoji: "📝", bg: "#3B82F6", x: 0, y: 0, w: HALF_W, h: HALF_H },
-  { label: "查詢假期", emoji: "📊", bg: "#22C55E", x: HALF_W, y: 0, w: HALF_W, h: HALF_H },
+  { label: "申請休假", icon: "filePen", bg: "#3B82F6", x: 0, y: 0, w: HALF_W, h: HALF_H },
+  { label: "查詢假期", icon: "barChart3", bg: "#22C55E", x: HALF_W, y: 0, w: HALF_W, h: HALF_H },
 ];
 
 const bottomCells = [
-  { label: "當月休假", emoji: "📆", bg: "#8B5CF6", x: 0, y: HALF_H, w: THIRD_W, h: HALF_H },
-  { label: "休假明細", emoji: "📋", bg: "#6366F1", x: THIRD_W, y: HALF_H, w: THIRD_W, h: HALF_H },
-  { label: "網頁版請假", emoji: "🌐", bg: "#F97316", x: THIRD_W * 2, y: HALF_H, w: CANVAS_W - THIRD_W * 2, h: HALF_H },
+  { label: "當月休假", icon: "calendarDays", bg: "#8B5CF6", x: 0, y: HALF_H, w: THIRD_W, h: HALF_H },
+  { label: "休假明細", icon: "clipboardList", bg: "#6366F1", x: THIRD_W, y: HALF_H, w: THIRD_W, h: HALF_H },
+  { label: "網頁版請假", icon: "globe", bg: "#F97316", x: THIRD_W * 2, y: HALF_H, w: CANVAS_W - THIRD_W * 2, h: HALF_H },
 ];
 
 const allCells = [...topCells, ...bottomCells];
@@ -67,8 +98,31 @@ const steps = [
   },
 ];
 
+function drawIcon(
+  ctx: CanvasRenderingContext2D,
+  paths: string[],
+  cx: number,
+  cy: number,
+  size: number,
+) {
+  const scale = size / 24;
+  ctx.save();
+  ctx.translate(cx - size / 2, cy - size / 2);
+  ctx.scale(scale, scale);
+  ctx.strokeStyle = "#FFFFFF";
+  ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.fillStyle = "transparent";
+  paths.forEach((d) => {
+    const p = new Path2D(d);
+    ctx.stroke(p);
+  });
+  ctx.restore();
+}
+
 function drawCell(ctx: CanvasRenderingContext2D, cell: typeof allCells[number]) {
-  const { x, y, w, h, bg, emoji, label } = cell;
+  const { x, y, w, h, bg, icon, label } = cell;
 
   ctx.fillStyle = bg;
   ctx.fillRect(x, y, w, h);
@@ -79,13 +133,16 @@ function drawCell(ctx: CanvasRenderingContext2D, cell: typeof allCells[number]) 
   ctx.fillStyle = grad;
   ctx.fillRect(x, y, w, h);
 
-  ctx.font = "180px serif";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(emoji, x + w / 2, y + h / 2 - 80);
+  // Draw Lucide icon
+  const iconPaths = ICON_PATHS[icon];
+  if (iconPaths) {
+    drawIcon(ctx, iconPaths, x + w / 2, y + h / 2 - 80, 160);
+  }
 
   ctx.fillStyle = "#FFFFFF";
   ctx.font = "bold 90px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
   ctx.fillText(label, x + w / 2, y + h / 2 + 100);
 }
 
