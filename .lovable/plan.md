@@ -1,60 +1,47 @@
 
 
-# 三合一功能實作計畫
+# 增強操作指南 + 確認 LINE 關鍵字回覆
 
-## 一、操作指南頁面（員工版 + 管理員版分開）
+## 一、增強員工指南（UserGuide.tsx）
 
-建立新頁面 `src/pages/UserGuide.tsx`，使用 Tabs 元件分為「員工指南」和「管理員指南」兩個分頁。非管理員只顯示員工分頁。
+在現有的每個操作步驟中加入更多視覺元素，讓內容更生動易懂：
 
-內容以純前端靜態呈現（不需資料庫），涵蓋之前產出的操作手冊內容：
-- 員工指南：登入註冊、申請休假、查看日曆、LINE 綁定與指令
-- 管理員指南：審核假單、員工管理、休假政策、通知設置、圖文選單設定
+### 新增的視覺元件：
+- **Tip 提示框**：淺藍色背景的小提示區塊（用 Lightbulb 圖示）
+- **Warning 警告框**：淺黃色背景的注意事項區塊（用 AlertTriangle 圖示）
+- **KeyboardShortcut 指令標籤**：用 Badge 元件呈現 LINE 指令，視覺上更突出
+- **每個 Section 加入更多 Lucide 圖示**裝飾子項目
 
-在 `AppLayout.tsx` 側邊欄新增「操作指南」導覽項（所有使用者可見），路由 `/user-guide`。
+### 內容擴充：
+- 註冊與登入：加入「密碼安全提示」和「忘記密碼流程」的詳細說明
+- 申請休假：加入假別說明表格（特休、病假、事假各自的簡短說明）
+- 休假日曆：加入顏色圖例說明區塊
+- LINE 功能：將指令表格改為卡片式排版，每個指令配一個圖示，並加入「綁定失敗怎麼辦？」的 FAQ
 
-## 二、管理員可設定其他人為管理員
+### 新增 Lucide 圖示引用：
+- `Lightbulb`, `AlertTriangle`, `Mail`, `Key`, `CheckCircle`, `XCircle`, `Smartphone`, `Link`, `HelpCircle`
 
-在 `src/pages/EmployeeManagement.tsx` 員工列表中，新增「角色」欄位，顯示目前角色（管理員/員工），並提供切換按鈕。
+## 二、LINE Bot 關鍵字回覆（已實作確認）
 
-技術細節：
-- 查詢 `user_roles` 表取得每位員工角色
-- 新增 `useMutation` 呼叫：
-  - 升級：`INSERT INTO user_roles (user_id, role) VALUES (..., 'admin')`
-  - 降級：`DELETE FROM user_roles WHERE user_id = ... AND role = 'admin'`
-- 使用 `AlertDialog` 確認操作，防止誤觸
-- 現有 RLS 政策 `Admins can manage roles` 已允許管理員對 `user_roles` 進行 CRUD，無需新增資料庫遷移
+LINE webhook 目前已使用 `text.includes()` 做關鍵字比對，支援以下關鍵字：
 
-## 三、忘記密碼 / 重設密碼功能
+| 關鍵字 | 功能 | 程式碼位置 |
+|--------|------|-----------|
+| 申請休假 | 顯示假別選擇輪播 | line 548 |
+| 查詢假期 | 顯示假期餘額 | line 562 |
+| 休假明細 | 顯示年度休假紀錄 | line 626 |
+| 當月休假 | 顯示當月所有人休假 | line 648 |
+| 綁定 + email | 綁定 LINE 帳號 | line 426-448 |
 
-### 3a. Auth 頁面新增「忘記密碼」連結
-在 `src/pages/Auth.tsx` 登入表單下方加入「忘記密碼？」連結，點擊後顯示 email 輸入框，呼叫：
-```
-supabase.auth.resetPasswordForEmail(email, {
-  redirectTo: window.location.origin + '/reset-password'
-})
-```
+因為使用 `includes()` 而非完全比對，所以即使訊息中包含其他文字（例如「我想申請休假」），也會觸發對應功能 -- 這正是你要的行為。
 
-### 3b. 新增 `/reset-password` 頁面
-建立 `src/pages/ResetPassword.tsx`：
-- 偵測 URL hash 中的 `type=recovery`
-- 顯示新密碼輸入表單
-- 呼叫 `supabase.auth.updateUser({ password })` 更新密碼
-- 成功後導向登入頁
+**不需要修改 LINE webhook**，功能已完整運作。
 
-### 3c. 路由設定
-在 `App.tsx` 新增公開路由 `/reset-password`（不需登入即可存取）。
-
----
-
-## 修改檔案清單
+## 修改檔案
 
 | 檔案 | 動作 |
 |------|------|
-| `src/pages/UserGuide.tsx` | 新建 - 操作指南頁面 |
-| `src/pages/ResetPassword.tsx` | 新建 - 重設密碼頁面 |
-| `src/pages/Auth.tsx` | 修改 - 加入忘記密碼流程 |
-| `src/pages/EmployeeManagement.tsx` | 修改 - 加入角色管理功能 |
-| `src/components/AppLayout.tsx` | 修改 - 側邊欄加入操作指南連結 |
-| `src/App.tsx` | 修改 - 新增兩條路由 |
+| `src/pages/UserGuide.tsx` | 修改 - 增強視覺元素與內容 |
 
-不需要資料庫遷移，現有 RLS 政策已足夠支援所有功能。
+無需修改 LINE webhook 或資料庫。
+
