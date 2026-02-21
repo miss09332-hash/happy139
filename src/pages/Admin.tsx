@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Check, X, Send, Pencil, Save } from "lucide-react";
+import { Search, Check, X, Send, Pencil, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -10,6 +10,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchLeavesWithProfiles, LeaveWithProfile } from "@/lib/queries";
 import { sendDailySummary } from "@/lib/line";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const statusColors: Record<string, string> = { pending: "bg-warning/10 text-warning", approved: "bg-success/10 text-success", rejected: "bg-destructive/10 text-destructive" };
 const statusLabels: Record<string, string> = { pending: "待審核", approved: "已核准", rejected: "已拒絕" };
@@ -56,6 +60,19 @@ export default function Admin() {
       toast.success("休假申請已更新");
     },
     onError: (err: any) => toast.error("更新失敗", { description: err.message }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("leave_requests").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-leaves"] });
+      setSelectedId(null);
+      toast.success("休假申請已刪除");
+    },
+    onError: (err: any) => toast.error("刪除失敗", { description: err.message }),
   });
 
   const notifyMutation = useMutation({
@@ -311,6 +328,31 @@ export default function Admin() {
                     >
                       <Send className="h-4 w-4" />通知員工已修改
                     </Button>
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" className="w-full gap-2">
+                          <Trash2 className="h-4 w-4" />刪除此申請
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>確認刪除</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            確定要刪除 {selected.profile_name} 的「{selected.leave_type}」休假申請（{selected.start_date}）嗎？此操作無法復原。
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>取消</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => deleteMutation.mutate(selected.id)}
+                          >
+                            刪除
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
                   </>
                 )}
               </div>
