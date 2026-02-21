@@ -1,51 +1,60 @@
 
 
-# 更新 LINE 圖文選單：新增「休假明細」按鈕
+# 三合一功能實作計畫
 
-## 背景
-LINE webhook 已支援「休假明細」指令（Quick Reply 也已包含），但圖文選單目前為 2x2 四格，尚未包含此功能。需要將選單改為可容納 5 個按鈕的版型，並更新圖片生成器與設定步驟。
+## 一、操作指南頁面（員工版 + 管理員版分開）
 
-## 設計方案
+建立新頁面 `src/pages/UserGuide.tsx`，使用 Tabs 元件分為「員工指南」和「管理員指南」兩個分頁。非管理員只顯示員工分頁。
 
-將版型從 2x2 改為「上方 2 格 + 下方 3 格」共 5 個區塊：
+內容以純前端靜態呈現（不需資料庫），涵蓋之前產出的操作手冊內容：
+- 員工指南：登入註冊、申請休假、查看日曆、LINE 綁定與指令
+- 管理員指南：審核假單、員工管理、休假政策、通知設置、圖文選單設定
 
-```text
-+------------+------------+
-| 申請休假    | 查詢假期    |
-|   (藍)     |   (綠)     |
-+--------+--------+-------+
-| 當月休假 | 休假明細 | 網頁版 |
-|  (紫)   | (靛藍)  | (橘)  |
-+--------+--------+-------+
+在 `AppLayout.tsx` 側邊欄新增「操作指南」導覽項（所有使用者可見），路由 `/user-guide`。
+
+## 二、管理員可設定其他人為管理員
+
+在 `src/pages/EmployeeManagement.tsx` 員工列表中，新增「角色」欄位，顯示目前角色（管理員/員工），並提供切換按鈕。
+
+技術細節：
+- 查詢 `user_roles` 表取得每位員工角色
+- 新增 `useMutation` 呼叫：
+  - 升級：`INSERT INTO user_roles (user_id, role) VALUES (..., 'admin')`
+  - 降級：`DELETE FROM user_roles WHERE user_id = ... AND role = 'admin'`
+- 使用 `AlertDialog` 確認操作，防止誤觸
+- 現有 RLS 政策 `Admins can manage roles` 已允許管理員對 `user_roles` 進行 CRUD，無需新增資料庫遷移
+
+## 三、忘記密碼 / 重設密碼功能
+
+### 3a. Auth 頁面新增「忘記密碼」連結
+在 `src/pages/Auth.tsx` 登入表單下方加入「忘記密碼？」連結，點擊後顯示 email 輸入框，呼叫：
+```
+supabase.auth.resetPasswordForEmail(email, {
+  redirectTo: window.location.origin + '/reset-password'
+})
 ```
 
-## 修改檔案
+### 3b. 新增 `/reset-password` 頁面
+建立 `src/pages/ResetPassword.tsx`：
+- 偵測 URL hash 中的 `type=recovery`
+- 顯示新密碼輸入表單
+- 呼叫 `supabase.auth.updateUser({ password })` 更新密碼
+- 成功後導向登入頁
 
-### 1. `src/pages/RichMenuGenerator.tsx`
+### 3c. 路由設定
+在 `App.tsx` 新增公開路由 `/reset-password`（不需登入即可存取）。
 
-**Canvas 繪製邏輯調整：**
-- 畫布尺寸維持 2500x1686
-- 上排：2 格，各佔 1250x843
-- 下排：3 格，各佔 833x843（最後一格取剩餘寬度）
-- 新增第 5 格「📋 休假明細」（靛藍色 #6366F1 背景）
+---
 
-**設定步驟更新：**
-- 步驟五：版型改為「大型 → 上方 2 格 + 下方 3 格」
-- 步驟七的動作對照表新增第 5 行：
+## 修改檔案清單
 
-| 區塊 | 類型 | 設定值 |
-|------|------|--------|
-| 左上（申請休假） | 文字 | 申請休假 |
-| 右上（查詢假期） | 文字 | 查詢假期 |
-| 左下（當月休假） | 文字 | 當月休假 |
-| 中下（休假明細） | 文字 | 休假明細 |
-| 右下（網頁版請假） | 連結 | (Published URL)/request-leave |
+| 檔案 | 動作 |
+|------|------|
+| `src/pages/UserGuide.tsx` | 新建 - 操作指南頁面 |
+| `src/pages/ResetPassword.tsx` | 新建 - 重設密碼頁面 |
+| `src/pages/Auth.tsx` | 修改 - 加入忘記密碼流程 |
+| `src/pages/EmployeeManagement.tsx` | 修改 - 加入角色管理功能 |
+| `src/components/AppLayout.tsx` | 修改 - 側邊欄加入操作指南連結 |
+| `src/App.tsx` | 修改 - 新增兩條路由 |
 
-## 關於 LINE 測試「休假明細」
-
-LINE webhook 中的「休假明細」功能已經部署完成，你可以直接在 LINE 聊天中輸入「休假明細」來測試。如果帳號已綁定，系統會回傳當年度所有休假紀錄的 Flex Message，包含假別、狀態、日期與原因。
-
-## 注意事項
-- 更新選單圖片後，需重新到 LINE 後台上傳新圖片並調整版型為 5 格
-- 現有的 LINE webhook 不需修改，已支援「休假明細」指令
-
+不需要資料庫遷移，現有 RLS 政策已足夠支援所有功能。
