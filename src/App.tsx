@@ -15,6 +15,8 @@ import LeaveBalance from "./pages/LeaveBalance";
 import EmployeeManagement from "./pages/EmployeeManagement";
 import Auth from "./pages/Auth";
 import RichMenuGenerator from "./pages/RichMenuGenerator";
+import UserGuide from "./pages/UserGuide";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -43,6 +45,7 @@ const App = () => (
         <AuthProvider>
           <Routes>
             <Route path="/auth" element={<Auth />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route
               element={
                 <ProtectedRoute>
@@ -86,6 +89,7 @@ const App = () => (
                   </AdminRoute>
                 }
               />
+              <Route path="/user-guide" element={<UserGuide />} />
               <Route
                 path="/rich-menu-generator"
                 element={
