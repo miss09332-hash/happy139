@@ -41,6 +41,7 @@ interface Profile {
   name: string;
   department: string;
   hire_date: string | null;
+  daily_work_hours: number;
 }
 
 interface AnnualLeaveRule {
@@ -58,7 +59,7 @@ export default function EmployeeManagement() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
-  const [form, setForm] = useState({ department: "", hire_date: "" });
+  const [form, setForm] = useState({ department: "", hire_date: "", daily_work_hours: "8" });
   const [roleConfirm, setRoleConfirm] = useState<{ profile: Profile; action: "promote" | "demote" } | null>(null);
 
   const { data: profiles = [], isLoading } = useQuery({
@@ -66,7 +67,7 @@ export default function EmployeeManagement() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, user_id, name, department, hire_date")
+        .select("id, user_id, name, department, hire_date, daily_work_hours")
         .order("name");
       if (error) throw error;
       return data as Profile[];
@@ -100,10 +101,10 @@ export default function EmployeeManagement() {
     userRoles.some((r) => r.user_id === userId && r.role === "admin");
 
   const updateProfile = useMutation({
-    mutationFn: async ({ id, department, hire_date }: { id: string; department: string; hire_date: string }) => {
+    mutationFn: async ({ id, department, hire_date, daily_work_hours }: { id: string; department: string; hire_date: string; daily_work_hours: number }) => {
       const { error } = await supabase
         .from("profiles")
-        .update({ department, hire_date: hire_date || null })
+        .update({ department, hire_date: hire_date || null, daily_work_hours })
         .eq("id", id);
       if (error) throw error;
     },
@@ -149,13 +150,13 @@ export default function EmployeeManagement() {
 
   const openEdit = (p: Profile) => {
     setEditingProfile(p);
-    setForm({ department: p.department, hire_date: p.hire_date || "" });
+    setForm({ department: p.department, hire_date: p.hire_date || "", daily_work_hours: String(p.daily_work_hours ?? 8) });
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProfile) return;
-    updateProfile.mutate({ id: editingProfile.id, ...form });
+    updateProfile.mutate({ id: editingProfile.id, department: form.department, hire_date: form.hire_date, daily_work_hours: Number(form.daily_work_hours) || 8 });
   };
 
   const handleRoleConfirm = () => {
@@ -202,8 +203,11 @@ export default function EmployeeManagement() {
                   <TableHead>姓名</TableHead>
                   <TableHead>部門</TableHead>
                   <TableHead>入職日期</TableHead>
+                  <TableHead>每日工時</TableHead>
                   <TableHead>年資</TableHead>
                   <TableHead>特休天數</TableHead>
+                  <TableHead>角色</TableHead>
+                  <TableHead className="w-16">操作</TableHead>
                   <TableHead>角色</TableHead>
                   <TableHead className="w-16">操作</TableHead>
                 </TableRow>
@@ -218,6 +222,7 @@ export default function EmployeeManagement() {
                       <TableCell className="font-medium">{p.name}</TableCell>
                       <TableCell>{p.department || "—"}</TableCell>
                       <TableCell>{p.hire_date || "未設定"}</TableCell>
+                      <TableCell>{p.daily_work_hours ?? 8}h</TableCell>
                       <TableCell>{info.yearsLabel ?? "—"}</TableCell>
                       <TableCell>
                         {info.annualDays !== null ? (
@@ -286,6 +291,18 @@ export default function EmployeeManagement() {
                 type="date"
                 value={form.hire_date}
                 onChange={(e) => setForm((f) => ({ ...f, hire_date: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>每日工時（小時）</Label>
+              <Input
+                type="number"
+                min="1"
+                max="24"
+                step="0.5"
+                value={form.daily_work_hours}
+                onChange={(e) => setForm((f) => ({ ...f, daily_work_hours: e.target.value }))}
+                placeholder="8"
               />
             </div>
             <Button type="submit" className="w-full" disabled={updateProfile.isPending}>

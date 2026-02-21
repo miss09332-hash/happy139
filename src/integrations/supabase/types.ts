@@ -84,10 +84,13 @@ export type Database = {
         Row: {
           created_at: string
           end_date: string
+          end_time: string | null
+          hours: number | null
           id: string
           leave_type: string
           reason: string
           start_date: string
+          start_time: string | null
           status: string
           updated_at: string
           user_id: string
@@ -95,10 +98,13 @@ export type Database = {
         Insert: {
           created_at?: string
           end_date: string
+          end_time?: string | null
+          hours?: number | null
           id?: string
           leave_type: string
           reason?: string
           start_date: string
+          start_time?: string | null
           status?: string
           updated_at?: string
           user_id: string
@@ -106,10 +112,13 @@ export type Database = {
         Update: {
           created_at?: string
           end_date?: string
+          end_time?: string | null
+          hours?: number | null
           id?: string
           leave_type?: string
           reason?: string
           start_date?: string
+          start_time?: string | null
           status?: string
           updated_at?: string
           user_id?: string
@@ -167,6 +176,7 @@ export type Database = {
       profiles: {
         Row: {
           created_at: string
+          daily_work_hours: number
           department: string
           hire_date: string | null
           id: string
@@ -177,6 +187,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          daily_work_hours?: number
           department?: string
           hire_date?: string | null
           id?: string
@@ -187,6 +198,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          daily_work_hours?: number
           department?: string
           hire_date?: string | null
           id?: string

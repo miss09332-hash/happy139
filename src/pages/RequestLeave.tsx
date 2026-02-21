@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Send, CalendarDays, Trash2, Menu } from "lucide-react";
+import { Send, CalendarDays, Trash2, Clock } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -27,11 +27,14 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { generateTimeOptions, calculateLeaveHours, formatHoursDisplay } from "@/lib/leaveCalculation";
 
 const leaveTypes = ["特休", "病假", "事假", "婚假", "產假", "喪假"] as const;
 
 const statusLabels: Record<string, string> = { pending: "待審核", approved: "已核准", rejected: "已拒絕" };
 const statusColors: Record<string, string> = { pending: "bg-warning/10 text-warning", approved: "bg-success/10 text-success", rejected: "bg-destructive/10 text-destructive" };
+
+const timeOptions = generateTimeOptions(0, 23);
 
 export default function RequestLeave() {
   const { user } = useAuth();
@@ -40,9 +43,28 @@ export default function RequestLeave() {
     leaveType: "",
     startDate: "",
     endDate: "",
+    startTime: "09:00",
+    endTime: "18:00",
     reason: "",
   });
   const [submitting, setSubmitting] = useState(false);
+
+  const { data: profile } = useQuery({
+    queryKey: ["my-profile", user?.id],
+    queryFn: async () => {
+      if (!user) return null;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("name, department, daily_work_hours")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  const dailyWorkHours = (profile as any)?.daily_work_hours ?? 8;
 
   const { data: myLeaves = [] } = useQuery({
     queryKey: ["my-leaves", user?.id],
@@ -71,6 +93,10 @@ export default function RequestLeave() {
     onError: (err: any) => toast.error("刪除失敗", { description: err.message }),
   });
 
+  const calculatedHours = form.startDate && form.endDate && form.startTime && form.endTime
+    ? calculateLeaveHours(form.startDate, form.endDate, form.startTime, form.endTime, dailyWorkHours)
+    : 0;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.leaveType || !form.startDate || !form.endDate) {
@@ -79,6 +105,10 @@ export default function RequestLeave() {
     }
     if (form.startDate > form.endDate) {
       toast.error("結束日期不能早於開始日期");
+      return;
+    }
+    if (calculatedHours <= 0) {
+      toast.error("請假時數必須大於 0");
       return;
     }
     setSubmitting(true);
@@ -105,19 +135,17 @@ export default function RequestLeave() {
         leave_type: form.leaveType,
         start_date: form.startDate,
         end_date: form.endDate,
+        start_time: form.startTime,
+        end_time: form.endTime,
+        hours: calculatedHours,
         reason: form.reason,
       });
       if (error) throw error;
       toast.success("休假申請已提交");
-      setForm({ leaveType: "", startDate: "", endDate: "", reason: "" });
+      setForm({ leaveType: "", startDate: "", endDate: "", startTime: "09:00", endTime: "18:00", reason: "" });
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
 
       // Notify admin via LINE
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("name, department")
-        .eq("user_id", user!.id)
-        .maybeSingle();
       supabase.functions.invoke("send-line-message", {
         body: {
           mode: "new-request",
@@ -126,6 +154,9 @@ export default function RequestLeave() {
           leaveType: form.leaveType,
           startDate: form.startDate,
           endDate: form.endDate,
+          startTime: form.startTime,
+          endTime: form.endTime,
+          hours: calculatedHours,
           reason: form.reason,
         },
       }).catch(() => {});
@@ -177,6 +208,42 @@ export default function RequestLeave() {
               </div>
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label>開始時間</Label>
+                <Select value={form.startTime} onValueChange={(v) => setForm({ ...form, startTime: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {timeOptions.map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>結束時間</Label>
+                <Select value={form.endTime} onValueChange={(v) => setForm({ ...form, endTime: v })}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {timeOptions.map((t) => (
+                      <SelectItem key={t} value={t}>{t}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {calculatedHours > 0 && (
+              <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/10 text-primary text-sm font-medium">
+                <Clock className="h-4 w-4" />
+                請假時數：{calculatedHours}h（{formatHoursDisplay(calculatedHours, dailyWorkHours)}）
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>休假原因</Label>
               <Textarea
@@ -213,9 +280,16 @@ export default function RequestLeave() {
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[leave.status]}`}>
                         {statusLabels[leave.status]}
                       </span>
+                      {(leave as any).hours && (
+                        <span className="text-xs text-muted-foreground">
+                          {(leave as any).hours}h
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      {leave.start_date === leave.end_date ? leave.start_date : `${leave.start_date} ~ ${leave.end_date}`}
+                      {leave.start_date === leave.end_date
+                        ? `${leave.start_date} ${(leave as any).start_time || ""} ~ ${(leave as any).end_time || ""}`
+                        : `${leave.start_date} ~ ${leave.end_date}`}
                     </p>
                     {leave.reason && (
                       <p className="text-xs text-muted-foreground mt-0.5 truncate">{leave.reason}</p>
