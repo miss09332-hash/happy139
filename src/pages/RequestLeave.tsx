@@ -12,14 +12,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Send, CalendarDays } from "lucide-react";
+import { Send, CalendarDays, Trash2, Menu } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const leaveTypes = ["特休", "病假", "事假", "婚假", "產假", "喪假"] as const;
 
+const statusLabels: Record<string, string> = { pending: "待審核", approved: "已核准", rejected: "已拒絕" };
+const statusColors: Record<string, string> = { pending: "bg-warning/10 text-warning", approved: "bg-success/10 text-success", rejected: "bg-destructive/10 text-destructive" };
+
 export default function RequestLeave() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [form, setForm] = useState({
     leaveType: "",
     startDate: "",
@@ -27,6 +43,33 @@ export default function RequestLeave() {
     reason: "",
   });
   const [submitting, setSubmitting] = useState(false);
+
+  const { data: myLeaves = [] } = useQuery({
+    queryKey: ["my-leaves", user?.id],
+    queryFn: async () => {
+      if (!user) return [];
+      const { data, error } = await supabase
+        .from("leave_requests")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("leave_requests").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
+      toast.success("休假申請已刪除");
+    },
+    onError: (err: any) => toast.error("刪除失敗", { description: err.message }),
+  });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +83,6 @@ export default function RequestLeave() {
     }
     setSubmitting(true);
     try {
-      // 檢查日期重疊
       const { data: overlapping } = await supabase
         .from("leave_requests")
         .select("id, leave_type, start_date, end_date")
@@ -68,6 +110,7 @@ export default function RequestLeave() {
       if (error) throw error;
       toast.success("休假申請已提交");
       setForm({ leaveType: "", startDate: "", endDate: "", reason: "" });
+      queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
 
       // Notify admin via LINE
       const { data: profile } = await supabase
@@ -85,7 +128,7 @@ export default function RequestLeave() {
           endDate: form.endDate,
           reason: form.reason,
         },
-      }).catch(() => {}); // fire-and-forget
+      }).catch(() => {});
     } catch (err: any) {
       toast.error("提交失敗", { description: err.message });
     } finally {
@@ -94,21 +137,21 @@ export default function RequestLeave() {
   };
 
   return (
-    <div className="min-h-screen p-6 lg:p-8 max-w-2xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold tracking-tight">申請休假</h1>
-        <p className="text-muted-foreground mt-1">填寫以下表單提交休假申請</p>
+    <div className="min-h-screen p-4 sm:p-6 lg:p-8 max-w-2xl mx-auto">
+      <div className="mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">申請休假</h1>
+        <p className="text-muted-foreground mt-1 text-sm">填寫以下表單提交休假申請</p>
       </div>
 
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
+      <Card className="glass-card mb-6">
+        <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
+          <CardTitle className="text-base sm:text-lg flex items-center gap-2">
             <CalendarDays className="h-5 w-5 text-primary" />
             休假申請表
           </CardTitle>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-5">
+        <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label>休假類型</Label>
               <Select value={form.leaveType} onValueChange={(v) => setForm({ ...form, leaveType: v })}>
@@ -123,7 +166,7 @@ export default function RequestLeave() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-2">
                 <Label>開始日期</Label>
                 <Input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })} />
@@ -149,6 +192,65 @@ export default function RequestLeave() {
               {submitting ? "提交中..." : "提交申請"}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      {/* My leave requests list */}
+      <Card className="glass-card">
+        <CardHeader className="p-4 sm:p-6 pb-2 sm:pb-4">
+          <CardTitle className="text-base sm:text-lg">我的休假申請</CardTitle>
+        </CardHeader>
+        <CardContent className="p-4 sm:p-6 pt-0 sm:pt-0">
+          {myLeaves.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8 text-sm">尚無休假申請</p>
+          ) : (
+            <div className="space-y-3">
+              {myLeaves.map((leave) => (
+                <div key={leave.id} className="flex items-center justify-between p-3 rounded-lg bg-secondary/30 border border-border/50">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <span className="font-medium text-sm">{leave.leave_type}</span>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${statusColors[leave.status]}`}>
+                        {statusLabels[leave.status]}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {leave.start_date === leave.end_date ? leave.start_date : `${leave.start_date} ~ ${leave.end_date}`}
+                    </p>
+                    {leave.reason && (
+                      <p className="text-xs text-muted-foreground mt-0.5 truncate">{leave.reason}</p>
+                    )}
+                  </div>
+                  {leave.status === "pending" && (
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="ghost" size="icon" className="shrink-0 ml-2 text-destructive hover:text-destructive hover:bg-destructive/10">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>確認刪除</AlertDialogTitle>
+                          <AlertDialogDescription>
+                            確定要刪除這筆「{leave.leave_type}」休假申請（{leave.start_date}）嗎？此操作無法復原。
+                          </AlertDialogDescription>
+                        </AlertDialogHeader>
+                        <AlertDialogFooter>
+                          <AlertDialogCancel>取消</AlertDialogCancel>
+                          <AlertDialogAction
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            onClick={() => deleteMutation.mutate(leave.id)}
+                          >
+                            刪除
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
