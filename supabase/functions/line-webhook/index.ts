@@ -424,11 +424,18 @@ serve(async (req) => {
 
         // Binding flow
         if (!profile) {
-          if (state?.step === "await_email") {
+          // Check if input looks like an email or starts with "綁定"
+          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+          let emailToCheck = text.toLowerCase();
+          // Support "綁定 email" format
+          if (emailToCheck.startsWith("綁定")) {
+            emailToCheck = emailToCheck.replace(/^綁定\s*/, "").trim();
+          }
+
+          if (emailRegex.test(emailToCheck)) {
             // Try to bind
-            const email = text.toLowerCase();
             const { data: authUsers } = await supabase.auth.admin.listUsers();
-            const matchedUser = authUsers?.users?.find((u: any) => u.email?.toLowerCase() === email);
+            const matchedUser = authUsers?.users?.find((u: any) => u.email?.toLowerCase() === emailToCheck);
             if (matchedUser) {
               await supabase.from("profiles").update({ line_user_id: userId }).eq("user_id", matchedUser.id);
               userState.delete(userId);
@@ -442,8 +449,7 @@ serve(async (req) => {
             }
             continue;
           }
-          // First message from unbound user
-          userState.set(userId, { step: "await_email", data: {} });
+          // Not an email — show bind prompt
           await replyMessage(replyToken, LINE_TOKEN, [buildBindPrompt()]);
           continue;
         }
