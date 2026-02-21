@@ -110,6 +110,27 @@ export type Database = {
         }
         Relationships: []
       }
+      line_conversation_state: {
+        Row: {
+          data: Json
+          line_user_id: string
+          step: string
+          updated_at: string
+        }
+        Insert: {
+          data?: Json
+          line_user_id: string
+          step?: string
+          updated_at?: string
+        }
+        Update: {
+          data?: Json
+          line_user_id?: string
+          step?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       notification_settings: {
         Row: {
           enabled: boolean

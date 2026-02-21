@@ -3,8 +3,38 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const LINE_API = "https://api.line.me/v2/bot/message/reply";
 
-// In-memory conversation state (reset on cold start, acceptable for short flows)
-const userState = new Map<string, { step: string; data: Record<string, string> }>();
+// ===== DB-backed conversation state =====
+
+async function getState(supabase: any, lineUserId: string) {
+  const { data } = await supabase
+    .from("line_conversation_state")
+    .select("step, data, updated_at")
+    .eq("line_user_id", lineUserId)
+    .maybeSingle();
+  if (!data) return null;
+  // Expire after 30 minutes
+  const updatedAt = new Date(data.updated_at).getTime();
+  if (Date.now() - updatedAt > 30 * 60 * 1000) {
+    await clearState(supabase, lineUserId);
+    return null;
+  }
+  return { step: data.step, data: data.data };
+}
+
+async function setState(supabase: any, lineUserId: string, step: string, stateData: Record<string, string>) {
+  await supabase.from("line_conversation_state").upsert({
+    line_user_id: lineUserId,
+    step,
+    data: stateData,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "line_user_id" });
+}
+
+async function clearState(supabase: any, lineUserId: string) {
+  await supabase.from("line_conversation_state").delete().eq("line_user_id", lineUserId);
+}
+
+// ===== Helpers =====
 
 function getLeaveTypeColor(type: string): string {
   const colors: Record<string, string> = {
@@ -60,16 +90,17 @@ function buildLeaveTypeCarousel(policies: any[]): object {
   };
 }
 
-function buildDatePrompt(leaveType: string): object {
+function buildStartDatePicker(leaveType: string): object {
+  const today = new Date().toISOString().split("T")[0];
   return {
-    type: "flex", altText: "請輸入休假日期",
+    type: "flex", altText: `${leaveType} - 選擇開始日期`,
     contents: {
       type: "bubble",
       header: {
         type: "box", layout: "vertical",
         contents: [
           { type: "text", text: `📅 ${leaveType}`, size: "lg", color: "#FFFFFF", weight: "bold" },
-          { type: "text", text: "請輸入休假日期", size: "xs", color: "#FFFFFFCC", margin: "xs" },
+          { type: "text", text: "選擇休假日期", size: "xs", color: "#FFFFFFCC", margin: "xs" },
         ],
         backgroundColor: getLeaveTypeColor(leaveType),
         paddingAll: "lg",
@@ -77,21 +108,85 @@ function buildDatePrompt(leaveType: string): object {
       body: {
         type: "box", layout: "vertical",
         contents: [
-          { type: "text", text: "請依照以下格式輸入：", size: "sm", color: "#555555", margin: "md" },
-          {
-            type: "box", layout: "vertical",
-            contents: [
-              { type: "text", text: "單日：2025-07-01", size: "sm", color: "#3B82F6" },
-              { type: "text", text: "多日：2025-07-01~2025-07-03", size: "sm", color: "#3B82F6", margin: "xs" },
-            ],
-            backgroundColor: "#F0F7FF",
-            cornerRadius: "md",
-            paddingAll: "md",
-            margin: "md",
-          },
-          { type: "text", text: "輸入完成後也可附加原因", size: "xxs", color: "#AAAAAA", margin: "lg" },
+          { type: "text", text: "請選擇休假開始日期", size: "sm", color: "#555555" },
+          { type: "text", text: "或直接輸入日期格式：2026-03-01", size: "xxs", color: "#AAAAAA", margin: "sm" },
         ],
         paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [
+          {
+            type: "button", style: "primary",
+            color: getLeaveTypeColor(leaveType),
+            action: {
+              type: "datetimepicker",
+              label: "📅 選擇開始日期",
+              data: `action=pick_start_date&type=${leaveType}`,
+              mode: "date",
+              initial: today,
+              min: today,
+            },
+          },
+          {
+            type: "button", style: "secondary",
+            action: { type: "postback", label: "❌ 取消申請", data: "action=cancel_leave" },
+          },
+        ],
+        paddingAll: "sm",
+      },
+    },
+  };
+}
+
+function buildEndDatePicker(leaveType: string, startDate: string): object {
+  return {
+    type: "flex", altText: `${leaveType} - 選擇結束日期`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: `📅 ${leaveType}`, size: "lg", color: "#FFFFFF", weight: "bold" },
+          { type: "text", text: "選擇結束日期", size: "xs", color: "#FFFFFFCC", margin: "xs" },
+        ],
+        backgroundColor: getLeaveTypeColor(leaveType),
+        paddingAll: "lg",
+      },
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: `開始日期：${startDate}`, size: "sm", color: "#333333", weight: "bold" },
+          { type: "text", text: "請選擇結束日期", size: "sm", color: "#555555", margin: "md" },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [
+          {
+            type: "button", style: "primary",
+            color: getLeaveTypeColor(leaveType),
+            action: {
+              type: "datetimepicker",
+              label: "📅 選擇結束日期",
+              data: `action=pick_end_date&type=${leaveType}&start=${startDate}`,
+              mode: "date",
+              initial: startDate,
+              min: startDate,
+            },
+          },
+          {
+            type: "button", style: "primary",
+            color: "#10B981",
+            action: { type: "postback", label: "📌 只請一天", data: `action=same_day&type=${leaveType}&start=${startDate}` },
+          },
+          {
+            type: "button", style: "secondary",
+            action: { type: "postback", label: "❌ 取消", data: "action=cancel_leave" },
+          },
+        ],
+        paddingAll: "sm",
       },
     },
   };
@@ -376,6 +471,86 @@ function buildTextMessage(text: string): object {
   return { type: "text", text };
 }
 
+// ===== Submit Leave Request =====
+
+async function submitLeaveRequest(
+  supabase: any, lineUserId: string, profile: any,
+  leaveType: string, startDate: string, endDate: string, reason: string,
+  replyToken: string, LINE_TOKEN: string
+) {
+  // Check overlap
+  const { data: overlapping } = await supabase
+    .from("leave_requests")
+    .select("id, leave_type, start_date, end_date")
+    .eq("user_id", profile.user_id)
+    .in("status", ["pending", "approved"])
+    .lte("start_date", endDate)
+    .gte("end_date", startDate);
+
+  if (overlapping && overlapping.length > 0) {
+    const existing = overlapping[0];
+    await clearState(supabase, lineUserId);
+    await replyMessage(replyToken, LINE_TOKEN, [
+      buildTextMessage(`❌ 日期重疊！\n您已有一筆「${existing.leave_type}」假單（${existing.start_date} ~ ${existing.end_date}）與此日期重疊，無法重複申請。`),
+    ]);
+    return;
+  }
+
+  const { error: insertErr } = await supabase.from("leave_requests").insert({
+    user_id: profile.user_id,
+    leave_type: leaveType,
+    start_date: startDate,
+    end_date: endDate,
+    reason,
+  });
+  await clearState(supabase, lineUserId);
+
+  if (insertErr) {
+    await replyMessage(replyToken, LINE_TOKEN, [
+      buildTextMessage(`❌ 申請失敗：${insertErr.message}`),
+    ]);
+  } else {
+    await replyMessage(replyToken, LINE_TOKEN, [
+      buildSuccessBubble(leaveType, startDate, endDate, reason),
+    ]);
+    // Notify admin
+    const NOTIFY_TARGET = Deno.env.get("LINE_NOTIFY_TARGET_ID");
+    if (NOTIFY_TARGET) {
+      const dateText = startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
+      const notifyBubble = {
+        type: "bubble",
+        header: { type: "box", layout: "vertical", contents: [
+          { type: "text", text: "📨 新休假申請 (LINE)", size: "lg", color: "#FFFFFF", weight: "bold" },
+        ], backgroundColor: "#F59E0B", paddingAll: "lg" },
+        body: { type: "box", layout: "vertical", paddingAll: "lg", contents: [
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "員工", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: `${profile.name}${profile.department ? ` (${profile.department})` : ""}`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+          ]},
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: leaveType, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+          ]},
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+          ]},
+        ]},
+        footer: { type: "box", layout: "vertical", contents: [
+          { type: "text", text: "⏳ 請前往後台審核", size: "xs", color: "#F59E0B", align: "center" },
+        ], paddingAll: "md", backgroundColor: "#FFFBEB" },
+      };
+      fetch("https://api.line.me/v2/bot/message/push", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
+        body: JSON.stringify({ to: NOTIFY_TARGET, messages: [{ type: "flex", altText: `新休假申請：${profile.name} - ${leaveType}`, contents: notifyBubble }] }),
+      }).catch(() => {});
+    }
+  }
+}
+
 // ===== Main Handler =====
 
 serve(async (req) => {
@@ -409,36 +584,79 @@ serve(async (req) => {
         const params = new URLSearchParams(event.postback.data);
         const action = params.get("action");
 
-        if (action === "select_leave" && profile) {
-          const leaveType = params.get("type")!;
-          userState.set(userId, { step: "await_date", data: { leaveType } });
-          await replyMessage(replyToken, LINE_TOKEN, [buildDatePrompt(leaveType)]);
+        // Cancel leave flow
+        if (action === "cancel_leave") {
+          await clearState(supabase, userId);
+          await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("已取消申請。")]);
+          continue;
         }
+
+        if (!profile) {
+          await replyMessage(replyToken, LINE_TOKEN, [buildBindPrompt()]);
+          continue;
+        }
+
+        // Step 1: User selected leave type → show start date picker
+        if (action === "select_leave") {
+          const leaveType = params.get("type")!;
+          await setState(supabase, userId, "await_start_date", { leaveType });
+          await replyMessage(replyToken, LINE_TOKEN, [buildStartDatePicker(leaveType)]);
+          continue;
+        }
+
+        // Step 2: User picked start date via datetime picker → show end date picker
+        if (action === "pick_start_date") {
+          const leaveType = params.get("type")!;
+          const startDate = event.postback.params?.date;
+          if (!startDate) {
+            await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("❌ 無法取得日期，請重試。")]);
+            continue;
+          }
+          await setState(supabase, userId, "await_end_date", { leaveType, startDate });
+          await replyMessage(replyToken, LINE_TOKEN, [buildEndDatePicker(leaveType, startDate)]);
+          continue;
+        }
+
+        // Step 3a: User picked end date via datetime picker → submit
+        if (action === "pick_end_date") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          const endDate = event.postback.params?.date;
+          if (!endDate) {
+            await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("❌ 無法取得日期，請重試。")]);
+            continue;
+          }
+          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, "", replyToken, LINE_TOKEN);
+          continue;
+        }
+
+        // Step 3b: Same day shortcut → submit
+        if (action === "same_day") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, startDate, "", replyToken, LINE_TOKEN);
+          continue;
+        }
+
         continue;
       }
 
       // --- Handle text message ---
       if (event.type === "message" && event.message?.type === "text") {
         const text = event.message.text.trim();
-        const state = userState.get(userId);
 
-        // Binding flow
+        // Binding flow (not bound yet)
         if (!profile) {
-          // Check if input looks like an email or starts with "綁定"
           const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
           let emailToCheck = text.toLowerCase();
-          // Support "綁定 email" format
           if (emailToCheck.startsWith("綁定")) {
             emailToCheck = emailToCheck.replace(/^綁定\s*/, "").trim();
           }
-
           if (emailRegex.test(emailToCheck)) {
-            // Try to bind
             const { data: authUsers } = await supabase.auth.admin.listUsers();
             const matchedUser = authUsers?.users?.find((u: any) => u.email?.toLowerCase() === emailToCheck);
             if (matchedUser) {
               await supabase.from("profiles").update({ line_user_id: userId }).eq("user_id", matchedUser.id);
-              userState.delete(userId);
               await replyMessage(replyToken, LINE_TOKEN, [
                 buildTextMessage(`✅ 綁定成功！歡迎使用休假系統。\n\n您可以傳送：\n📝 申請休假\n📊 查詢假期\n📆 當月休假`),
               ]);
@@ -449,104 +667,40 @@ serve(async (req) => {
             }
             continue;
           }
-          // Not an email — show bind prompt
           await replyMessage(replyToken, LINE_TOKEN, [buildBindPrompt()]);
           continue;
         }
 
-        // --- Date input for leave application ---
-        if (state?.step === "await_date") {
-          const leaveType = state.data.leaveType;
-          // Parse date: "2025-07-01" or "2025-07-01~2025-07-03" optionally followed by reason
-          const dateMatch = text.match(/^(\d{4}-\d{2}-\d{2})(?:\s*[~～\-至到]\s*(\d{4}-\d{2}-\d{2}))?(?:\s+(.+))?$/);
-          if (!dateMatch) {
-            await replyMessage(replyToken, LINE_TOKEN, [
-              buildTextMessage("❌ 日期格式不正確，請重新輸入。\n例如：2025-07-01 或 2025-07-01~2025-07-03"),
-            ]);
-            continue;
-          }
-          const startDate = dateMatch[1];
-          const endDate = dateMatch[2] || startDate;
-          const reason = dateMatch[3] || "";
+        // Check if user is in a conversation state (fallback text date input)
+        const state = await getState(supabase, userId);
 
-          // 檢查日期重疊
-          const { data: overlapping } = await supabase
-            .from("leave_requests")
-            .select("id, leave_type, start_date, end_date")
-            .eq("user_id", profile.user_id)
-            .in("status", ["pending", "approved"])
-            .lte("start_date", endDate)
-            .gte("end_date", startDate);
-
-          if (overlapping && overlapping.length > 0) {
-            const existing = overlapping[0];
-            await replyMessage(replyToken, LINE_TOKEN, [
-              buildTextMessage(`❌ 日期重疊！\n您已有一筆「${existing.leave_type}」假單（${existing.start_date} ~ ${existing.end_date}）與此日期重疊，無法重複申請。\n\n請重新輸入其他日期，或傳送「取消」放棄。`),
-            ]);
-            continue;
-          }
-
-          // Handle cancel
-          if (text === "取消") {
-            userState.delete(userId);
+        // Cancel command
+        if (text === "取消") {
+          if (state) {
+            await clearState(supabase, userId);
             await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("已取消申請。")]);
+          } else {
+            await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("目前沒有進行中的操作。")]);
+          }
+          continue;
+        }
+
+        // Fallback: text date input while in leave flow
+        if (state?.step === "await_start_date" || state?.step === "await_end_date") {
+          const leaveType = state.data.leaveType;
+          // Parse: "2026-03-01" or "2026-03-01~2026-03-03" optionally followed by reason
+          const dateMatch = text.match(/^(\d{4}-\d{2}-\d{2})(?:\s*[~～\-至到]\s*(\d{4}-\d{2}-\d{2}))?(?:\s+(.+))?$/);
+          if (dateMatch) {
+            const startDate = state.step === "await_end_date" ? (state.data.startDate || dateMatch[1]) : dateMatch[1];
+            const endDate = dateMatch[2] || (state.step === "await_end_date" ? dateMatch[1] : dateMatch[1]);
+            const reason = dateMatch[3] || "";
+            await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, reason, replyToken, LINE_TOKEN);
             continue;
           }
-
-          // Insert leave request
-          const { error: insertErr } = await supabase.from("leave_requests").insert({
-            user_id: profile.user_id,
-            leave_type: leaveType,
-            start_date: startDate,
-            end_date: endDate,
-            reason,
-          });
-          userState.delete(userId);
-
-          if (insertErr) {
-            await replyMessage(replyToken, LINE_TOKEN, [
-              buildTextMessage(`❌ 申請失敗：${insertErr.message}`),
-            ]);
-          } else {
-            await replyMessage(replyToken, LINE_TOKEN, [
-              buildSuccessBubble(leaveType, startDate, endDate, reason),
-            ]);
-            // Notify admin via LINE push
-            const NOTIFY_TARGET = Deno.env.get("LINE_NOTIFY_TARGET_ID");
-            if (NOTIFY_TARGET) {
-              const dateText = startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
-              const notifyBubble = {
-                type: "bubble",
-                header: { type: "box", layout: "vertical", contents: [
-                  { type: "text", text: "📨 新休假申請 (LINE)", size: "lg", color: "#FFFFFF", weight: "bold" },
-                ], backgroundColor: "#F59E0B", paddingAll: "lg" },
-                body: { type: "box", layout: "vertical", paddingAll: "lg", contents: [
-                  { type: "box", layout: "horizontal", margin: "md", contents: [
-                    { type: "text", text: "員工", size: "sm", color: "#AAAAAA", flex: 2 },
-                    { type: "text", text: `${profile.name}${profile.department ? ` (${profile.department})` : ""}`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
-                  ]},
-                  { type: "separator", margin: "md", color: "#F0F0F0" },
-                  { type: "box", layout: "horizontal", margin: "md", contents: [
-                    { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
-                    { type: "text", text: leaveType, size: "sm", color: "#333333", weight: "bold", flex: 5 },
-                  ]},
-                  { type: "separator", margin: "md", color: "#F0F0F0" },
-                  { type: "box", layout: "horizontal", margin: "md", contents: [
-                    { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
-                    { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
-                  ]},
-                ]},
-                footer: { type: "box", layout: "vertical", contents: [
-                  { type: "text", text: "⏳ 請前往後台審核", size: "xs", color: "#F59E0B", align: "center" },
-                ], paddingAll: "md", backgroundColor: "#FFFBEB" },
-              };
-              fetch("https://api.line.me/v2/bot/message/push", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", Authorization: `Bearer ${LINE_TOKEN}` },
-                body: JSON.stringify({ to: NOTIFY_TARGET, messages: [{ type: "flex", altText: `新休假申請：${profile.name} - ${leaveType}`, contents: notifyBubble }] }),
-              }).catch(() => {});
-            }
-          }
+          // Not a valid date, remind
+          await replyMessage(replyToken, LINE_TOKEN, [
+            buildTextMessage("❌ 日期格式不正確。\n請使用日期選擇器，或輸入格式：2026-03-01\n\n傳送「取消」可放棄申請。"),
+          ]);
           continue;
         }
 
@@ -571,7 +725,6 @@ serve(async (req) => {
             .select("*")
             .eq("is_active", true);
 
-          // Fetch annual leave rules for dynamic calculation
           const { data: annualRules } = await supabase
             .from("annual_leave_rules")
             .select("min_months, max_months, days")
@@ -586,7 +739,6 @@ serve(async (req) => {
             .gte("start_date", `${year}-01-01`)
             .lte("start_date", `${year}-12-31`);
 
-          // Calculate used days per type
           const usedMap = new Map<string, number>();
           for (const l of leaves ?? []) {
             const days = Math.ceil(
@@ -595,7 +747,6 @@ serve(async (req) => {
             usedMap.set(l.leave_type, (usedMap.get(l.leave_type) ?? 0) + days);
           }
 
-          // Calculate dynamic annual leave days based on hire_date
           let dynamicAnnualDays: number | null = null;
           if (profile.hire_date && annualRules?.length) {
             const hireDate = new Date(profile.hire_date);
@@ -709,7 +860,6 @@ serve(async (req) => {
     });
   } catch (error: unknown) {
     console.error("Webhook error:", error);
-    // LINE requires 200 even on error
     return new Response(JSON.stringify({ success: false }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
