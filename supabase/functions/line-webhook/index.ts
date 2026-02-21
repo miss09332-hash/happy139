@@ -196,6 +196,90 @@ function buildBalanceBubble(balances: { type: string; total: number; used: numbe
   };
 }
 
+function buildLeaveDetailBubble(records: { type: string; start: string; end: string; status: string; reason: string }[]): object {
+  const statusMap: Record<string, { label: string; color: string }> = {
+    pending: { label: "待審核", color: "#F59E0B" },
+    approved: { label: "已核准", color: "#22C55E" },
+    rejected: { label: "已拒絕", color: "#EF4444" },
+  };
+
+  const year = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).getUTCFullYear();
+
+  if (records.length === 0) {
+    return {
+      type: "flex", altText: `${year} 年休假明細`,
+      contents: {
+        type: "bubble",
+        header: {
+          type: "box", layout: "vertical",
+          contents: [
+            { type: "text", text: "📋 休假明細", size: "xl", color: "#FFFFFF", weight: "bold" },
+            { type: "text", text: `${year} 年度`, size: "xs", color: "#FFFFFFCC", margin: "xs" },
+          ],
+          backgroundColor: "#6366F1", paddingAll: "lg",
+        },
+        body: {
+          type: "box", layout: "vertical", paddingAll: "lg",
+          contents: [{ type: "text", text: "🎉 今年尚無休假紀錄", size: "md", color: "#4CAF50", align: "center", margin: "xl" }],
+        },
+      },
+    };
+  }
+
+  const rows: object[] = [];
+  records.forEach((r, i) => {
+    const s = statusMap[r.status] ?? { label: r.status, color: "#999999" };
+    const dateText = r.start === r.end ? r.start : `${r.start} ~ ${r.end}`;
+    const days = Math.ceil((new Date(r.end).getTime() - new Date(r.start).getTime()) / 86400000) + 1;
+
+    rows.push({
+      type: "box", layout: "vertical", margin: i > 0 ? "lg" : "none",
+      contents: [
+        {
+          type: "box", layout: "horizontal", alignItems: "center",
+          contents: [
+            {
+              type: "box", layout: "vertical", flex: 0,
+              contents: [{ type: "text", text: r.type, size: "xxs", color: "#FFFFFF", align: "center" }],
+              backgroundColor: getLeaveTypeColor(r.type), cornerRadius: "4px",
+              paddingAll: "3px", paddingStart: "6px", paddingEnd: "6px",
+            },
+            {
+              type: "box", layout: "vertical", flex: 0, margin: "sm",
+              contents: [{ type: "text", text: s.label, size: "xxs", color: s.color, align: "center" }],
+              backgroundColor: `${s.color}15`, cornerRadius: "4px",
+              paddingAll: "3px", paddingStart: "6px", paddingEnd: "6px",
+            },
+            { type: "text", text: `${days}天`, size: "xs", color: "#666666", align: "end", flex: 1 },
+          ],
+        },
+        { type: "text", text: dateText, size: "xs", color: "#888888", margin: "xs" },
+        ...(r.reason ? [{ type: "text", text: `原因：${r.reason}`, size: "xxs", color: "#AAAAAA", margin: "xs", wrap: true }] : []),
+      ],
+    });
+
+    if (i < records.length - 1) {
+      rows.push({ type: "separator", margin: "md", color: "#F0F0F0" });
+    }
+  });
+
+  return {
+    type: "flex", altText: `${year} 年休假明細`,
+    contents: {
+      type: "bubble", size: "mega",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: "📋 休假明細", size: "xl", color: "#FFFFFF", weight: "bold" },
+          { type: "text", text: `${year} 年度 · 共 ${records.length} 筆`, size: "xs", color: "#FFFFFFCC", margin: "xs" },
+        ],
+        backgroundColor: "#6366F1", paddingAll: "lg",
+      },
+      body: { type: "box", layout: "vertical", contents: rows, paddingAll: "lg" },
+    },
+  };
+}
+
 function buildMonthlyLeaveBubble(entries: { name: string; dept: string; type: string; dates: string }[]): object {
   const contents: object[] = entries.length === 0
     ? [{ type: "text", text: "🎉 本月無人休假", size: "md", color: "#4CAF50", align: "center", margin: "xl" }]
@@ -539,6 +623,28 @@ serve(async (req) => {
           continue;
         }
 
+        if (text.includes("休假明細")) {
+          const year = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).getUTCFullYear();
+          const { data: leaves } = await supabase
+            .from("leave_requests")
+            .select("leave_type, start_date, end_date, status, reason")
+            .eq("user_id", profile.user_id)
+            .gte("start_date", `${year}-01-01`)
+            .lte("start_date", `${year}-12-31`)
+            .order("start_date", { ascending: false });
+
+          const records = (leaves ?? []).map((l: any) => ({
+            type: l.leave_type,
+            start: l.start_date,
+            end: l.end_date,
+            status: l.status,
+            reason: l.reason || "",
+          }));
+
+          await replyMessage(replyToken, LINE_TOKEN, [buildLeaveDetailBubble(records)]);
+          continue;
+        }
+
         if (text.includes("當月休假")) {
           const twNow = new Date(new Date().getTime() + 8 * 60 * 60 * 1000);
           const monthStart = `${twNow.getUTCFullYear()}-${String(twNow.getUTCMonth() + 1).padStart(2, "0")}-01`;
@@ -582,6 +688,7 @@ serve(async (req) => {
             items: [
               { type: "action", action: { type: "message", label: "📝 申請休假", text: "申請休假" } },
               { type: "action", action: { type: "message", label: "📊 查詢假期", text: "查詢假期" } },
+              { type: "action", action: { type: "message", label: "📋 休假明細", text: "休假明細" } },
               { type: "action", action: { type: "message", label: "📆 當月休假", text: "當月休假" } },
               { type: "action", action: { type: "uri", label: "🌐 網頁版請假", uri: `${APP_URL}/request-leave` } },
             ],
