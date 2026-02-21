@@ -20,7 +20,7 @@ async function getState(supabase: any, lineUserId: string) {
   return { step: data.step, data: data.data };
 }
 
-async function setState(supabase: any, lineUserId: string, step: string, stateData: Record<string, string>) {
+async function setState(supabase: any, lineUserId: string, step: string, stateData: Record<string, any>) {
   await supabase.from("line_conversation_state").upsert({
     line_user_id: lineUserId,
     step,
@@ -51,6 +51,15 @@ function calculateAnnualDays(hireDate: string | null, rules: { min_months: numbe
     }
   }
   return 0;
+}
+
+function formatHoursDisplay(totalHours: number, dailyWorkHours: number = 8): string {
+  if (totalHours <= 0) return "0h";
+  const days = Math.floor(totalHours / dailyWorkHours);
+  const remainingHours = totalHours % dailyWorkHours;
+  if (days === 0) return `${remainingHours}h`;
+  if (remainingHours === 0) return `${days}天`;
+  return `${days}天 ${remainingHours}h`;
 }
 
 const COMMON_LEAVE_TYPES = ["特休", "病假", "事假"];
@@ -110,7 +119,6 @@ function buildLeaveTypeCarousel(policies: any[], annualDaysOverride?: number | n
   };
   });
 
-  // Add "其他假別" card if there are other types
   if (otherPolicies.length > 0) {
     bubbles.push({
       type: "bubble",
@@ -291,7 +299,103 @@ function buildEndDatePicker(leaveType: string, startDate: string): object {
   };
 }
 
-function buildReasonPrompt(leaveType: string, startDate: string, endDate: string): object {
+function buildFullDayPrompt(leaveType: string, startDate: string, endDate: string): object {
+  const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1;
+  return {
+    type: "flex", altText: `${leaveType} - 選擇整天或時段`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: `⏰ ${leaveType}`, size: "lg", color: "#FFFFFF", weight: "bold" },
+          { type: "text", text: "選擇請假方式", size: "xs", color: "#FFFFFFCC", margin: "xs" },
+        ],
+        backgroundColor: getLeaveTypeColor(leaveType),
+        paddingAll: "lg",
+      },
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          buildInfoRow("日期", startDate === endDate ? startDate : `${startDate} ~ ${endDate}`),
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          buildInfoRow("天數", `${days} 天`),
+          { type: "text", text: "請選擇整天請假或指定時段", size: "sm", color: "#555555", margin: "lg" },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical", spacing: "sm",
+        contents: [
+          {
+            type: "button", style: "primary", color: "#10B981",
+            action: { type: "postback", label: "✅ 整天請假", data: `action=full_day&type=${leaveType}&start=${startDate}&end=${endDate}` },
+          },
+          {
+            type: "button", style: "primary", color: getLeaveTypeColor(leaveType),
+            action: { type: "postback", label: "⏰ 選擇時間", data: `action=pick_time&type=${leaveType}&start=${startDate}&end=${endDate}` },
+          },
+          {
+            type: "button", style: "secondary",
+            action: { type: "postback", label: "❌ 取消", data: "action=cancel_leave" },
+          },
+        ],
+        paddingAll: "sm",
+      },
+    },
+  };
+}
+
+function buildTimeQuickReply(prompt: string, actionPrefix: string, leaveType: string, startDate: string, endDate: string): object {
+  const times = ["09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30","14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00"];
+  return {
+    type: "text",
+    text: prompt,
+    quickReply: {
+      items: times.map(t => ({
+        type: "action",
+        action: {
+          type: "postback",
+          label: t,
+          data: `action=${actionPrefix}&type=${leaveType}&start=${startDate}&end=${endDate}&time=${t}`,
+        },
+      })),
+    },
+  };
+}
+
+function buildReasonPrompt(leaveType: string, startDate: string, endDate: string, startTime?: string, endTime?: string, hours?: number): object {
+  const contents: any[] = [
+    buildInfoRow("開始", startDate),
+    { type: "separator", margin: "md", color: "#F0F0F0" },
+    buildInfoRow("結束", endDate),
+  ];
+
+  if (startTime && endTime) {
+    contents.push(
+      { type: "separator", margin: "md", color: "#F0F0F0" },
+      buildInfoRow("時段", `${startTime} ~ ${endTime}`),
+    );
+  }
+  if (hours) {
+    contents.push(
+      { type: "separator", margin: "md", color: "#F0F0F0" },
+      buildInfoRow("時數", `${hours}h（${formatHoursDisplay(hours)}）`),
+    );
+  }
+
+  contents.push(
+    { type: "separator", margin: "md", color: "#F0F0F0" },
+    { type: "text", text: "請輸入休假原因", size: "sm", color: "#555555", margin: "lg" },
+    { type: "text", text: "直接輸入文字即可", size: "xxs", color: "#AAAAAA", margin: "xs" },
+  );
+
+  // Encode time info into skip_reason postback data
+  let skipData = `action=skip_reason&type=${leaveType}&start=${startDate}&end=${endDate}`;
+  if (startTime) skipData += `&st=${startTime}`;
+  if (endTime) skipData += `&et=${endTime}`;
+  if (hours) skipData += `&hours=${hours}`;
+
   return {
     type: "flex", altText: `${leaveType} - 填寫原因`,
     contents: {
@@ -306,14 +410,7 @@ function buildReasonPrompt(leaveType: string, startDate: string, endDate: string
       },
       body: {
         type: "box", layout: "vertical",
-        contents: [
-          buildInfoRow("開始", startDate),
-          { type: "separator", margin: "md", color: "#F0F0F0" },
-          buildInfoRow("結束", endDate),
-          { type: "separator", margin: "md", color: "#F0F0F0" },
-          { type: "text", text: "請輸入休假原因", size: "sm", color: "#555555", margin: "lg" },
-          { type: "text", text: "直接輸入文字即可", size: "xxs", color: "#AAAAAA", margin: "xs" },
-        ],
+        contents,
         paddingAll: "lg",
       },
       footer: {
@@ -321,7 +418,7 @@ function buildReasonPrompt(leaveType: string, startDate: string, endDate: string
         contents: [
           {
             type: "button", style: "primary", color: "#10B981",
-            action: { type: "postback", label: "📌 不填原因，直接送出", data: `action=skip_reason&type=${leaveType}&start=${startDate}&end=${endDate}` },
+            action: { type: "postback", label: "📌 不填原因，直接送出", data: skipData },
           },
           {
             type: "button", style: "secondary",
@@ -334,7 +431,34 @@ function buildReasonPrompt(leaveType: string, startDate: string, endDate: string
   };
 }
 
-function buildSuccessBubble(leaveType: string, startDate: string, endDate: string, reason: string): object {
+function buildSuccessBubble(leaveType: string, startDate: string, endDate: string, reason: string, startTime?: string, endTime?: string, hours?: number): object {
+  const bodyContents: any[] = [
+    buildInfoRow("假別", leaveType),
+    { type: "separator", margin: "md", color: "#F0F0F0" },
+    buildInfoRow("開始", startDate),
+    { type: "separator", margin: "md", color: "#F0F0F0" },
+    buildInfoRow("結束", endDate),
+  ];
+
+  if (startTime && endTime) {
+    bodyContents.push(
+      { type: "separator", margin: "md", color: "#F0F0F0" },
+      buildInfoRow("時段", `${startTime} ~ ${endTime}`),
+    );
+  }
+  if (hours) {
+    bodyContents.push(
+      { type: "separator", margin: "md", color: "#F0F0F0" },
+      buildInfoRow("時數", `${hours}h（${formatHoursDisplay(hours)}）`),
+    );
+  }
+  if (reason) {
+    bodyContents.push(
+      { type: "separator", margin: "md", color: "#F0F0F0" },
+      buildInfoRow("原因", reason),
+    );
+  }
+
   return {
     type: "flex", altText: "休假申請成功！",
     contents: {
@@ -350,17 +474,7 @@ function buildSuccessBubble(leaveType: string, startDate: string, endDate: strin
       },
       body: {
         type: "box", layout: "vertical",
-        contents: [
-          buildInfoRow("假別", leaveType),
-          { type: "separator", margin: "md", color: "#F0F0F0" },
-          buildInfoRow("開始", startDate),
-          { type: "separator", margin: "md", color: "#F0F0F0" },
-          buildInfoRow("結束", endDate),
-          ...(reason ? [
-            { type: "separator", margin: "md", color: "#F0F0F0" },
-            buildInfoRow("原因", reason),
-          ] : []),
-        ],
+        contents: bodyContents,
         paddingAll: "lg",
       },
       footer: {
@@ -383,10 +497,45 @@ function buildInfoRow(label: string, value: string): object {
   };
 }
 
-function buildBalanceBubble(balances: { type: string; total: number; used: number; color: string }[]): object {
-  const rows = balances.map((b) => {
-    const remaining = Math.max(b.total - b.used, 0);
-    const pct = b.total > 0 ? Math.round((b.used / b.total) * 100) : 0;
+function buildBalanceBubble(balances: { type: string; totalHours: number; usedHours: number; color: string; dailyWorkHours: number }[], showAll: boolean = false): object {
+  const filtered = showAll ? balances : balances.filter(b => b.usedHours > 0);
+  
+  if (filtered.length === 0) {
+    return {
+      type: "flex", altText: "休假餘額查詢",
+      contents: {
+        type: "bubble", size: "mega",
+        header: {
+          type: "box", layout: "vertical",
+          contents: [
+            { type: "text", text: "🏖️ 休假餘額", size: "xl", color: "#FFFFFF", weight: "bold" },
+            { type: "text", text: `${new Date().getFullYear()} 年度`, size: "xs", color: "#FFFFFFCC", margin: "xs" },
+          ],
+          backgroundColor: "#3B82F6", paddingAll: "lg",
+        },
+        body: {
+          type: "box", layout: "vertical", paddingAll: "lg",
+          contents: [
+            { type: "text", text: "🎉 今年尚無休假紀錄", size: "md", color: "#4CAF50", align: "center", margin: "xl" },
+          ],
+        },
+        footer: {
+          type: "box", layout: "vertical", paddingAll: "md",
+          contents: [{
+            type: "button", style: "link",
+            action: { type: "postback", label: "📋 查看全部假別", data: "action=show_all_balance" },
+          }],
+        },
+      },
+    };
+  }
+
+  const rows = filtered.map((b) => {
+    const remainingHours = Math.max(b.totalHours - b.usedHours, 0);
+    const pct = b.totalHours > 0 ? Math.round((b.usedHours / b.totalHours) * 100) : 0;
+    const usedDisplay = formatHoursDisplay(b.usedHours, b.dailyWorkHours);
+    const totalDisplay = formatHoursDisplay(b.totalHours, b.dailyWorkHours);
+    const remainDisplay = formatHoursDisplay(remainingHours, b.dailyWorkHours);
     return {
       type: "box", layout: "vertical", margin: "lg",
       contents: [
@@ -394,7 +543,7 @@ function buildBalanceBubble(balances: { type: string; total: number; used: numbe
           type: "box", layout: "horizontal",
           contents: [
             { type: "text", text: b.type, size: "sm", color: "#333333", weight: "bold", flex: 3 },
-            { type: "text", text: `${remaining}/${b.total} 天`, size: "sm", color: "#666666", align: "end", flex: 2 },
+            { type: "text", text: `剩 ${remainDisplay} / 共 ${totalDisplay}`, size: "xs", color: "#666666", align: "end", flex: 4 },
           ],
         },
         {
@@ -407,9 +556,23 @@ function buildBalanceBubble(balances: { type: string; total: number; used: numbe
             backgroundColor: b.color,
           }],
         },
+        {
+          type: "text", text: `已用 ${usedDisplay}`, size: "xxs", color: "#999999", margin: "xs",
+        },
       ],
     };
   });
+
+  const footerContents: any[] = [];
+  if (!showAll) {
+    footerContents.push({
+      type: "button", style: "link",
+      action: { type: "postback", label: "📋 查看全部假別", data: "action=show_all_balance" },
+    });
+  }
+  footerContents.push(
+    { type: "text", text: showAll ? "顯示全部假別" : "僅顯示已使用的假別", size: "xxs", color: "#AAAAAA", align: "center" },
+  );
 
   return {
     type: "flex", altText: "休假餘額查詢",
@@ -429,11 +592,17 @@ function buildBalanceBubble(balances: { type: string; total: number; used: numbe
         contents: rows,
         paddingAll: "lg",
       },
+      footer: {
+        type: "box", layout: "vertical",
+        contents: footerContents,
+        paddingAll: "md", backgroundColor: "#FAFAFA",
+      },
+      styles: { footer: { separator: true } },
     },
   };
 }
 
-function buildLeaveDetailBubble(records: { type: string; start: string; end: string; status: string; reason: string }[]): object {
+function buildLeaveDetailBubble(records: { type: string; start: string; end: string; status: string; reason: string; hours?: number; startTime?: string; endTime?: string }[]): object {
   const statusMap: Record<string, { label: string; color: string }> = {
     pending: { label: "待審核", color: "#F59E0B" },
     approved: { label: "已核准", color: "#22C55E" },
@@ -467,7 +636,10 @@ function buildLeaveDetailBubble(records: { type: string; start: string; end: str
   records.forEach((r, i) => {
     const s = statusMap[r.status] ?? { label: r.status, color: "#999999" };
     const dateText = r.start === r.end ? r.start : `${r.start} ~ ${r.end}`;
-    const days = Math.ceil((new Date(r.end).getTime() - new Date(r.start).getTime()) / 86400000) + 1;
+    const hoursText = r.hours ? `${r.hours}h` : (() => {
+      const days = Math.ceil((new Date(r.end).getTime() - new Date(r.start).getTime()) / 86400000) + 1;
+      return `${days}天`;
+    })();
 
     rows.push({
       type: "box", layout: "vertical", margin: i > 0 ? "lg" : "none",
@@ -487,10 +659,11 @@ function buildLeaveDetailBubble(records: { type: string; start: string; end: str
               backgroundColor: `${s.color}15`, cornerRadius: "4px",
               paddingAll: "3px", paddingStart: "6px", paddingEnd: "6px",
             },
-            { type: "text", text: `${days}天`, size: "xs", color: "#666666", align: "end", flex: 1 },
+            { type: "text", text: hoursText, size: "xs", color: "#666666", align: "end", flex: 1 },
           ],
         },
         { type: "text", text: dateText, size: "xs", color: "#888888", margin: "xs" },
+        ...(r.startTime && r.endTime ? [{ type: "text", text: `${r.startTime} ~ ${r.endTime}`, size: "xxs", color: "#AAAAAA", margin: "xs" }] : []),
         ...(r.reason ? [{ type: "text", text: `原因：${r.reason}`, size: "xxs", color: "#AAAAAA", margin: "xs", wrap: true }] : []),
       ],
     });
@@ -618,7 +791,8 @@ function buildTextMessage(text: string): object {
 async function submitLeaveRequest(
   supabase: any, lineUserId: string, profile: any,
   leaveType: string, startDate: string, endDate: string, reason: string,
-  replyToken: string, LINE_TOKEN: string
+  replyToken: string, LINE_TOKEN: string,
+  startTime?: string, endTime?: string, hours?: number
 ) {
   // Check overlap
   const { data: overlapping } = await supabase
@@ -638,13 +812,18 @@ async function submitLeaveRequest(
     return;
   }
 
-  const { error: insertErr } = await supabase.from("leave_requests").insert({
+  const insertData: any = {
     user_id: profile.user_id,
     leave_type: leaveType,
     start_date: startDate,
     end_date: endDate,
     reason,
-  });
+  };
+  if (startTime) insertData.start_time = startTime;
+  if (endTime) insertData.end_time = endTime;
+  if (hours) insertData.hours = hours;
+
+  const { error: insertErr } = await supabase.from("leave_requests").insert(insertData);
   await clearState(supabase, lineUserId);
 
   if (insertErr) {
@@ -653,40 +832,63 @@ async function submitLeaveRequest(
     ]);
   } else {
     await replyMessage(replyToken, LINE_TOKEN, [
-      buildSuccessBubble(leaveType, startDate, endDate, reason),
+      buildSuccessBubble(leaveType, startDate, endDate, reason, startTime, endTime, hours),
     ]);
     // Notify admin
     const NOTIFY_TARGET = Deno.env.get("LINE_NOTIFY_TARGET_ID");
     if (NOTIFY_TARGET) {
       const dateText = startDate === endDate ? startDate : `${startDate} ~ ${endDate}`;
+      const bodyContents: any[] = [
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "員工", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: `${profile.name}${profile.department ? ` (${profile.department})` : ""}`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+        ]},
+        { type: "separator", margin: "md", color: "#F0F0F0" },
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: leaveType, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+        ]},
+        { type: "separator", margin: "md", color: "#F0F0F0" },
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+        ]},
+      ];
+
+      if (startTime && endTime) {
+        bodyContents.push(
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "時段", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: `${startTime} ~ ${endTime}`, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+          ]},
+        );
+      }
+      if (hours) {
+        bodyContents.push(
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "時數", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: `${hours}h（${formatHoursDisplay(hours, profile.daily_work_hours || 8)}）`, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+          ]},
+        );
+      }
+      if (reason) {
+        bodyContents.push(
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "原因", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: reason, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+          ]},
+        );
+      }
+
       const notifyBubble = {
         type: "bubble",
         header: { type: "box", layout: "vertical", contents: [
           { type: "text", text: "📨 新休假申請 (LINE)", size: "lg", color: "#FFFFFF", weight: "bold" },
         ], backgroundColor: "#F59E0B", paddingAll: "lg" },
-        body: { type: "box", layout: "vertical", paddingAll: "lg", contents: [
-          { type: "box", layout: "horizontal", margin: "md", contents: [
-            { type: "text", text: "員工", size: "sm", color: "#AAAAAA", flex: 2 },
-            { type: "text", text: `${profile.name}${profile.department ? ` (${profile.department})` : ""}`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
-          ]},
-          { type: "separator", margin: "md", color: "#F0F0F0" },
-          { type: "box", layout: "horizontal", margin: "md", contents: [
-            { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
-            { type: "text", text: leaveType, size: "sm", color: "#333333", weight: "bold", flex: 5 },
-          ]},
-          { type: "separator", margin: "md", color: "#F0F0F0" },
-          { type: "box", layout: "horizontal", margin: "md", contents: [
-            { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
-            { type: "text", text: dateText, size: "sm", color: "#333333", weight: "bold", flex: 5 },
-          ]},
-          ...(reason ? [
-            { type: "separator", margin: "md", color: "#F0F0F0" },
-            { type: "box", layout: "horizontal", margin: "md", contents: [
-              { type: "text", text: "原因", size: "sm", color: "#AAAAAA", flex: 2 },
-              { type: "text", text: reason, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
-            ]},
-          ] : []),
-        ]},
+        body: { type: "box", layout: "vertical", paddingAll: "lg", contents: bodyContents },
         footer: { type: "box", layout: "vertical", contents: [
           { type: "text", text: "⏳ 請前往後台審核", size: "xs", color: "#F59E0B", align: "center" },
         ], paddingAll: "md", backgroundColor: "#FFFBEB" },
@@ -698,6 +900,52 @@ async function submitLeaveRequest(
       }).catch(() => {});
     }
   }
+}
+
+// ===== Balance query helper =====
+
+async function queryBalance(supabase: any, profile: any, showAll: boolean) {
+  const { data: policies } = await supabase
+    .from("leave_policies")
+    .select("*")
+    .eq("is_active", true);
+
+  const { data: annualRules } = await supabase
+    .from("annual_leave_rules")
+    .select("min_months, max_months, days")
+    .order("min_months");
+
+  const year = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).getUTCFullYear();
+  const { data: leaves } = await supabase
+    .from("leave_requests")
+    .select("leave_type, start_date, end_date, hours")
+    .eq("user_id", profile.user_id)
+    .in("status", ["approved", "pending"])
+    .gte("start_date", `${year}-01-01`)
+    .lte("start_date", `${year}-12-31`);
+
+  const dailyWorkHours = profile.daily_work_hours || 8;
+
+  const usedHoursMap = new Map<string, number>();
+  for (const l of leaves ?? []) {
+    const h = l.hours || ((Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1) * dailyWorkHours);
+    usedHoursMap.set(l.leave_type, (usedHoursMap.get(l.leave_type) ?? 0) + h);
+  }
+
+  const dynamicAnnualDays = calculateAnnualDays(profile.hire_date, annualRules ?? []);
+
+  const balances = (policies ?? []).map((p: any) => {
+    const totalDays = p.leave_type === "特休" && dynamicAnnualDays !== null ? dynamicAnnualDays : p.default_days;
+    return {
+      type: p.leave_type,
+      totalHours: totalDays * dailyWorkHours,
+      usedHours: usedHoursMap.get(p.leave_type) ?? 0,
+      color: getLeaveTypeColor(p.leave_type),
+      dailyWorkHours,
+    };
+  });
+
+  return buildBalanceBubble(balances, showAll);
 }
 
 // ===== Main Handler =====
@@ -724,7 +972,7 @@ serve(async (req) => {
       // Look up bound profile
       const { data: profile } = await supabase
         .from("profiles")
-        .select("user_id, name, department, hire_date")
+        .select("user_id, name, department, hire_date, daily_work_hours")
         .eq("line_user_id", userId)
         .maybeSingle();
 
@@ -742,6 +990,13 @@ serve(async (req) => {
 
         if (!profile) {
           await replyMessage(replyToken, LINE_TOKEN, [buildBindPrompt()]);
+          continue;
+        }
+
+        // Show all balance
+        if (action === "show_all_balance") {
+          const bubble = await queryBalance(supabase, profile, true);
+          await replyMessage(replyToken, LINE_TOKEN, [bubble]);
           continue;
         }
 
@@ -781,7 +1036,7 @@ serve(async (req) => {
           continue;
         }
 
-        // Step 3a: User picked end date → show reason prompt
+        // Step 3a: User picked end date → show full day prompt
         if (action === "pick_end_date") {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
@@ -790,26 +1045,98 @@ serve(async (req) => {
             await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("❌ 無法取得日期，請重試。")]);
             continue;
           }
-          await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate });
-          await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, endDate)]);
+          await setState(supabase, userId, "await_full_day", { leaveType, startDate, endDate });
+          await replyMessage(replyToken, LINE_TOKEN, [buildFullDayPrompt(leaveType, startDate, endDate)]);
           continue;
         }
 
-        // Step 3b: Same day shortcut → show reason prompt
+        // Step 3b: Same day shortcut → show full day prompt
         if (action === "same_day") {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
-          await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate: startDate });
-          await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, startDate)]);
+          await setState(supabase, userId, "await_full_day", { leaveType, startDate, endDate: startDate });
+          await replyMessage(replyToken, LINE_TOKEN, [buildFullDayPrompt(leaveType, startDate, startDate)]);
           continue;
         }
 
-        // Step 4: Skip reason → submit directly
+        // Step 4a: Full day → go to reason
+        if (action === "full_day") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          const endDate = params.get("end")!;
+          const dailyWorkHours = profile.daily_work_hours || 8;
+          const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1;
+          const hours = days * dailyWorkHours;
+          await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate, startTime: "09:00", endTime: "18:00", hours: String(hours) });
+          await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, endDate, undefined, undefined, hours)]);
+          continue;
+        }
+
+        // Step 4b: Pick time → ask start time
+        if (action === "pick_time") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          const endDate = params.get("end")!;
+          await setState(supabase, userId, "await_start_time", { leaveType, startDate, endDate });
+          await replyMessage(replyToken, LINE_TOKEN, [
+            buildTimeQuickReply("請選擇開始時間：", "set_start_time", leaveType, startDate, endDate),
+          ]);
+          continue;
+        }
+
+        // Step 4c: Set start time → ask end time
+        if (action === "set_start_time") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          const endDate = params.get("end")!;
+          const time = params.get("time")!;
+          await setState(supabase, userId, "await_end_time", { leaveType, startDate, endDate, startTime: time });
+          await replyMessage(replyToken, LINE_TOKEN, [
+            buildTimeQuickReply(`開始時間：${time}\n請選擇結束時間：`, "set_end_time", leaveType, startDate, endDate),
+          ]);
+          continue;
+        }
+
+        // Step 4d: Set end time → calculate hours → go to reason
+        if (action === "set_end_time") {
+          const leaveType = params.get("type")!;
+          const startDate = params.get("start")!;
+          const endDate = params.get("end")!;
+          const endTime = params.get("time")!;
+          const state = await getState(supabase, userId);
+          const startTime = state?.data?.startTime || "09:00";
+          const dailyWorkHours = profile.daily_work_hours || 8;
+
+          // Calculate hours
+          const timeToHours = (t: string) => { const [h, m] = t.split(":").map(Number); return h + m / 60; };
+          const sTime = timeToHours(startTime);
+          const eTime = timeToHours(endTime);
+          const diffDays = Math.round((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000);
+          let hours: number;
+          if (diffDays === 0) {
+            hours = Math.max(0, Math.round((eTime - sTime) * 2) / 2);
+          } else {
+            const workEnd = 9 + dailyWorkHours;
+            const firstDayHours = Math.max(0, Math.round((workEnd - sTime) * 2) / 2);
+            const lastDayHours = Math.max(0, Math.round((eTime - 9) * 2) / 2);
+            const middleDays = Math.max(0, diffDays - 1);
+            hours = firstDayHours + (middleDays * dailyWorkHours) + lastDayHours;
+          }
+
+          await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate, startTime, endTime, hours: String(hours) });
+          await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, endDate, startTime, endTime, hours)]);
+          continue;
+        }
+
+        // Step 5: Skip reason → submit directly
         if (action === "skip_reason") {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
           const endDate = params.get("end")!;
-          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, "", replyToken, LINE_TOKEN);
+          const st = params.get("st") || undefined;
+          const et = params.get("et") || undefined;
+          const h = params.get("hours") ? Number(params.get("hours")) : undefined;
+          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, "", replyToken, LINE_TOKEN, st, et, h);
           continue;
         }
 
@@ -862,8 +1189,11 @@ serve(async (req) => {
 
         // Handle await_reason state: user typing reason text
         if (state?.step === "await_reason") {
-          const { leaveType, startDate, endDate } = state.data;
-          await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, text, replyToken, LINE_TOKEN);
+          const { leaveType, startDate, endDate, startTime, endTime, hours } = state.data;
+          await submitLeaveRequest(
+            supabase, userId, profile, leaveType, startDate, endDate, text, replyToken, LINE_TOKEN,
+            startTime || undefined, endTime || undefined, hours ? Number(hours) : undefined
+          );
           continue;
         }
 
@@ -876,12 +1206,15 @@ serve(async (req) => {
             const endDate = dateMatch[2] || (state.step === "await_end_date" ? dateMatch[1] : dateMatch[1]);
             const reason = dateMatch[3] || "";
             if (reason) {
-              // User provided reason inline with date, submit directly
-              await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, reason, replyToken, LINE_TOKEN);
+              // User provided reason inline with date, calculate full day hours and submit
+              const dailyWorkHours = profile.daily_work_hours || 8;
+              const days = Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / 86400000) + 1;
+              const hours = days * dailyWorkHours;
+              await submitLeaveRequest(supabase, userId, profile, leaveType, startDate, endDate, reason, replyToken, LINE_TOKEN, "09:00", "18:00", hours);
             } else {
-              // No reason provided, go to reason step
-              await setState(supabase, userId, "await_reason", { leaveType, startDate, endDate });
-              await replyMessage(replyToken, LINE_TOKEN, [buildReasonPrompt(leaveType, startDate, endDate)]);
+              // Show full day prompt
+              await setState(supabase, userId, "await_full_day", { leaveType, startDate, endDate });
+              await replyMessage(replyToken, LINE_TOKEN, [buildFullDayPrompt(leaveType, startDate, endDate)]);
             }
             continue;
           }
@@ -907,43 +1240,8 @@ serve(async (req) => {
         }
 
         if (text.includes("查詢休假") || text.includes("查詢假期") || text.includes("假期餘額") || text.includes("休假餘額")) {
-          const { data: policies } = await supabase
-            .from("leave_policies")
-            .select("*")
-            .eq("is_active", true);
-
-          const { data: annualRules } = await supabase
-            .from("annual_leave_rules")
-            .select("min_months, max_months, days")
-            .order("min_months");
-
-          const year = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).getUTCFullYear();
-          const { data: leaves } = await supabase
-            .from("leave_requests")
-            .select("leave_type, start_date, end_date")
-            .eq("user_id", profile.user_id)
-            .in("status", ["approved", "pending"])
-            .gte("start_date", `${year}-01-01`)
-            .lte("start_date", `${year}-12-31`);
-
-          const usedMap = new Map<string, number>();
-          for (const l of leaves ?? []) {
-            const days = Math.ceil(
-              (new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000
-            ) + 1;
-            usedMap.set(l.leave_type, (usedMap.get(l.leave_type) ?? 0) + days);
-          }
-
-          const dynamicAnnualDays = calculateAnnualDays(profile.hire_date, annualRules ?? []);
-
-          const balances = (policies ?? []).map((p: any) => ({
-            type: p.leave_type,
-            total: p.leave_type === "特休" && dynamicAnnualDays !== null ? dynamicAnnualDays : p.default_days,
-            used: usedMap.get(p.leave_type) ?? 0,
-            color: getLeaveTypeColor(p.leave_type),
-          }));
-
-          await replyMessage(replyToken, LINE_TOKEN, [buildBalanceBubble(balances)]);
+          const bubble = await queryBalance(supabase, profile, false);
+          await replyMessage(replyToken, LINE_TOKEN, [bubble]);
           continue;
         }
 
@@ -951,7 +1249,7 @@ serve(async (req) => {
           const year = new Date(new Date().getTime() + 8 * 60 * 60 * 1000).getUTCFullYear();
           const { data: leaves } = await supabase
             .from("leave_requests")
-            .select("leave_type, start_date, end_date, status, reason")
+            .select("leave_type, start_date, end_date, status, reason, hours, start_time, end_time")
             .eq("user_id", profile.user_id)
             .gte("start_date", `${year}-01-01`)
             .lte("start_date", `${year}-12-31`)
@@ -963,6 +1261,9 @@ serve(async (req) => {
             end: l.end_date,
             status: l.status,
             reason: l.reason || "",
+            hours: l.hours || undefined,
+            startTime: l.start_time || undefined,
+            endTime: l.end_time || undefined,
           }));
 
           await replyMessage(replyToken, LINE_TOKEN, [buildLeaveDetailBubble(records)]);
@@ -1004,7 +1305,7 @@ serve(async (req) => {
         }
 
         // Default reply: guide to Rich Menu
-        const APP_URL = "https://id-preview--c01a8d7a-ca4a-4296-b0f5-7ae0f33dd9b2.lovable.app";
+        const APP_URL = "https://happy139.lovable.app";
         await replyMessage(replyToken, LINE_TOKEN, [{
           type: "text",
           text: "👋 請使用下方圖文選單操作休假功能。\n\n若選單未顯示，也可輸入以下指令：\n📝 申請休假\n📊 查詢休假\n📋 休假明細\n📆 當月休假",

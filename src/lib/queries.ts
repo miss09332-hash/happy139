@@ -6,6 +6,9 @@ export interface LeaveWithProfile {
   leave_type: string;
   start_date: string;
   end_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  hours: number | null;
   reason: string;
   status: string;
   created_at: string;

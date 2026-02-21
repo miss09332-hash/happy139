@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Search, Check, X, Send, Pencil, Save, Trash2 } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Search, Check, X, Send, Pencil, Save, Trash2, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -10,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchLeavesWithProfiles, LeaveWithProfile } from "@/lib/queries";
 import { sendDailySummary } from "@/lib/line";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { formatHoursDisplay } from "@/lib/leaveCalculation";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
@@ -30,6 +32,9 @@ export default function Admin() {
   const [editStatus, setEditStatus] = useState("");
   const [editStartDate, setEditStartDate] = useState("");
   const [editEndDate, setEditEndDate] = useState("");
+  const [editStartTime, setEditStartTime] = useState("");
+  const [editEndTime, setEditEndTime] = useState("");
+  const [editHours, setEditHours] = useState<number | "">("");
   const queryClient = useQueryClient();
 
   const { data: requests = [] } = useQuery({
@@ -50,8 +55,15 @@ export default function Admin() {
   });
 
   const editMutation = useMutation({
-    mutationFn: async ({ id, status, start_date, end_date }: { id: string; status: string; start_date: string; end_date: string }) => {
-      const { error } = await supabase.from("leave_requests").update({ status, start_date, end_date }).eq("id", id);
+    mutationFn: async ({ id, status, start_date, end_date, start_time, end_time, hours }: {
+      id: string; status: string; start_date: string; end_date: string;
+      start_time?: string; end_time?: string; hours?: number;
+    }) => {
+      const update: any = { status, start_date, end_date };
+      if (start_time !== undefined) update.start_time = start_time;
+      if (end_time !== undefined) update.end_time = end_time;
+      if (hours !== undefined) update.hours = hours;
+      const { error } = await supabase.from("leave_requests").update(update).eq("id", id);
       if (error) throw error;
     },
     onSuccess: () => {
@@ -77,7 +89,6 @@ export default function Admin() {
 
   const notifyMutation = useMutation({
     mutationFn: async (leave: LeaveWithProfile) => {
-      // Find the employee's LINE user ID
       const { data: profile } = await supabase
         .from("profiles")
         .select("line_user_id")
@@ -91,6 +102,41 @@ export default function Admin() {
       const statusText = statusLabels[leave.status] ?? leave.status;
       const now = new Date().toLocaleString("zh-TW", { timeZone: "Asia/Taipei" });
 
+      const bodyContents: any[] = [
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: leave.leave_type, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+        ]},
+        { type: "separator", margin: "md", color: "#F0F0F0" },
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: `${dateText} 共計${days}天`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
+        ]},
+      ];
+
+      if (leave.hours) {
+        bodyContents.push(
+          { type: "separator", margin: "md", color: "#F0F0F0" },
+          { type: "box", layout: "horizontal", margin: "md", contents: [
+            { type: "text", text: "時數", size: "sm", color: "#AAAAAA", flex: 2 },
+            { type: "text", text: `${leave.hours}h`, size: "sm", color: "#333333", weight: "bold", flex: 5 },
+          ]},
+        );
+      }
+
+      bodyContents.push(
+        { type: "separator", margin: "md", color: "#F0F0F0" },
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "狀態", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: statusText, size: "sm", color: leave.status === "approved" ? "#22C55E" : leave.status === "rejected" ? "#EF4444" : "#F59E0B", weight: "bold", flex: 5 },
+        ]},
+        { type: "separator", margin: "md", color: "#F0F0F0" },
+        { type: "box", layout: "horizontal", margin: "md", contents: [
+          { type: "text", text: "更新時間", size: "sm", color: "#AAAAAA", flex: 2 },
+          { type: "text", text: now, size: "sm", color: "#333333", flex: 5, wrap: true },
+        ]},
+      );
+
       const bubble = {
         type: "bubble",
         header: {
@@ -103,27 +149,7 @@ export default function Admin() {
         },
         body: {
           type: "box", layout: "vertical", paddingAll: "lg",
-          contents: [
-            { type: "box", layout: "horizontal", margin: "md", contents: [
-              { type: "text", text: "假別", size: "sm", color: "#AAAAAA", flex: 2 },
-              { type: "text", text: leave.leave_type, size: "sm", color: "#333333", weight: "bold", flex: 5 },
-            ]},
-            { type: "separator", margin: "md", color: "#F0F0F0" },
-            { type: "box", layout: "horizontal", margin: "md", contents: [
-              { type: "text", text: "日期", size: "sm", color: "#AAAAAA", flex: 2 },
-              { type: "text", text: `${dateText} 共計${days}天`, size: "sm", color: "#333333", weight: "bold", flex: 5, wrap: true },
-            ]},
-            { type: "separator", margin: "md", color: "#F0F0F0" },
-            { type: "box", layout: "horizontal", margin: "md", contents: [
-              { type: "text", text: "狀態", size: "sm", color: "#AAAAAA", flex: 2 },
-              { type: "text", text: statusText, size: "sm", color: leave.status === "approved" ? "#22C55E" : leave.status === "rejected" ? "#EF4444" : "#F59E0B", weight: "bold", flex: 5 },
-            ]},
-            { type: "separator", margin: "md", color: "#F0F0F0" },
-            { type: "box", layout: "horizontal", margin: "md", contents: [
-              { type: "text", text: "更新時間", size: "sm", color: "#AAAAAA", flex: 2 },
-              { type: "text", text: now, size: "sm", color: "#333333", flex: 5, wrap: true },
-            ]},
-          ],
+          contents: bodyContents,
         },
         footer: {
           type: "box", layout: "vertical",
@@ -149,6 +175,9 @@ export default function Admin() {
     setEditStatus(selected.status);
     setEditStartDate(selected.start_date);
     setEditEndDate(selected.end_date);
+    setEditStartTime(selected.start_time || "");
+    setEditEndTime(selected.end_time || "");
+    setEditHours(selected.hours ?? "");
     setEditing(true);
   };
 
@@ -158,7 +187,15 @@ export default function Admin() {
       toast.error("開始日期不能晚於結束日期");
       return;
     }
-    editMutation.mutate({ id: selected.id, status: editStatus, start_date: editStartDate, end_date: editEndDate });
+    editMutation.mutate({
+      id: selected.id,
+      status: editStatus,
+      start_date: editStartDate,
+      end_date: editEndDate,
+      start_time: editStartTime || undefined,
+      end_time: editEndTime || undefined,
+      hours: editHours !== "" ? Number(editHours) : undefined,
+    });
   };
 
   const filterByStatus = (status: string) => {
@@ -223,6 +260,9 @@ export default function Admin() {
                           </div>
                           <div className="flex items-center gap-2">
                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${leaveTypeColors[r.leave_type] ?? ""}`}>{r.leave_type}</span>
+                            {r.hours && (
+                              <span className="text-xs text-muted-foreground">{r.hours}h</span>
+                            )}
                             <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${statusColors[r.status]}`}>{statusLabels[r.status]}</span>
                           </div>
                         </button>
@@ -286,6 +326,20 @@ export default function Admin() {
                         <Input type="date" value={editEndDate} onChange={(e) => setEditEndDate(e.target.value)} />
                       </div>
                     </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <Label className="text-sm text-muted-foreground">開始時間</Label>
+                        <Input value={editStartTime} onChange={(e) => setEditStartTime(e.target.value)} placeholder="09:00" />
+                      </div>
+                      <div>
+                        <Label className="text-sm text-muted-foreground">結束時間</Label>
+                        <Input value={editEndTime} onChange={(e) => setEditEndTime(e.target.value)} placeholder="18:00" />
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-sm text-muted-foreground">請假時數</Label>
+                      <Input type="number" min={0} step={0.5} value={editHours} onChange={(e) => setEditHours(e.target.value ? Number(e.target.value) : "")} placeholder="8" />
+                    </div>
                     <div className="flex gap-3 pt-2">
                       <Button className="flex-1 gap-2" onClick={saveEdit} disabled={editMutation.isPending}>
                         <Save className="h-4 w-4" />儲存
@@ -306,7 +360,19 @@ export default function Admin() {
                       </div>
                       <div><p className="text-muted-foreground">開始日期</p><p className="font-medium mt-1">{selected.start_date}</p></div>
                       <div><p className="text-muted-foreground">結束日期</p><p className="font-medium mt-1">{selected.end_date}</p></div>
+                      {selected.start_time && (
+                        <div><p className="text-muted-foreground">開始時間</p><p className="font-medium mt-1">{selected.start_time}</p></div>
+                      )}
+                      {selected.end_time && (
+                        <div><p className="text-muted-foreground">結束時間</p><p className="font-medium mt-1">{selected.end_time}</p></div>
+                      )}
                     </div>
+                    {selected.hours && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/10 text-primary text-sm font-medium">
+                        <Clock className="h-4 w-4" />
+                        請假時數：{selected.hours}h（{formatHoursDisplay(selected.hours)}）
+                      </div>
+                    )}
                     <div className="text-sm"><p className="text-muted-foreground">休假原因</p><p className="mt-1">{selected.reason || "無"}</p></div>
                     <div className="text-sm"><p className="text-muted-foreground">最後更新</p><p className="mt-1">{new Date(selected.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" })}</p></div>
 
