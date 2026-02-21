@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
-import { calculateAnnualLeaveDays, getMonthsOfService } from "@/lib/leaveCalculation";
+import { calculateAnnualLeaveDays, getMonthsOfService, formatHoursDisplay } from "@/lib/leaveCalculation";
 import { sendLeaveBalanceReminder } from "@/lib/line";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,8 @@ interface EmployeeBalance {
   department: string;
   hireDate: string | null;
   lineBound: boolean;
-  balances: { leaveType: string; total: number; used: number }[];
+  dailyWorkHours: number;
+  balances: { leaveType: string; totalHours: number; usedHours: number }[];
 }
 
 export default function LeaveBalance() {
@@ -58,41 +59,44 @@ export default function LeaveBalance() {
     queryFn: async () => {
       const { data: profiles, error: pErr } = await supabase
         .from("profiles")
-        .select("user_id, name, department, hire_date, line_user_id")
+        .select("user_id, name, department, hire_date, line_user_id, daily_work_hours")
         .order("name");
       if (pErr) throw pErr;
 
       const year = new Date().getFullYear();
       const { data: leaves, error: lErr } = await supabase
         .from("leave_requests")
-        .select("user_id, leave_type, start_date, end_date")
+        .select("user_id, leave_type, start_date, end_date, hours")
         .in("status", ["approved", "pending"])
         .gte("start_date", `${year}-01-01`)
         .lte("start_date", `${year}-12-31`);
       if (lErr) throw lErr;
 
+      // Sum used hours per user per leave type
       const usedMap = new Map<string, Map<string, number>>();
       for (const l of leaves ?? []) {
-        const days = Math.ceil(
-          (new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000
-        ) + 1;
+        // Use hours field if available, otherwise fall back to day calculation
+        const hours = (l as any).hours
+          ? Number((l as any).hours)
+          : (Math.ceil((new Date(l.end_date).getTime() - new Date(l.start_date).getTime()) / 86400000) + 1) * 8;
         if (!usedMap.has(l.user_id)) usedMap.set(l.user_id, new Map());
         const m = usedMap.get(l.user_id)!;
-        m.set(l.leave_type, (m.get(l.leave_type) ?? 0) + days);
+        m.set(l.leave_type, (m.get(l.leave_type) ?? 0) + hours);
       }
 
       return (profiles ?? []).map((p): EmployeeBalance => {
+        const dwh = (p as any).daily_work_hours ?? 8;
         const months = p.hire_date ? getMonthsOfService(p.hire_date) : 0;
         const userUsed = usedMap.get(p.user_id) ?? new Map<string, number>();
 
         const balances = (policies ?? []).map((pol) => {
-          const total = pol.leave_type === "特休"
+          const totalDays = pol.leave_type === "特休"
             ? calculateAnnualLeaveDays(months, annualRules)
             : pol.default_days;
           return {
             leaveType: pol.leave_type,
-            total,
-            used: userUsed.get(pol.leave_type) ?? 0,
+            totalHours: totalDays * dwh,
+            usedHours: userUsed.get(pol.leave_type) ?? 0,
           };
         });
 
@@ -102,6 +106,7 @@ export default function LeaveBalance() {
           department: p.department,
           hireDate: p.hire_date,
           lineBound: !!p.line_user_id,
+          dailyWorkHours: dwh,
           balances,
         };
       });
@@ -142,7 +147,7 @@ export default function LeaveBalance() {
           <div>
             <h1 className="text-2xl font-bold text-foreground">休假餘額追蹤</h1>
             <p className="text-sm text-muted-foreground">
-              {new Date().getFullYear()} 年度各員工休假使用狀況
+              {new Date().getFullYear()} 年度各員工休假使用狀況（以小時計）
             </p>
           </div>
         </div>
@@ -186,6 +191,7 @@ export default function LeaveBalance() {
                 <TableRow>
                   <TableHead className="sticky left-0 bg-background z-10">員工</TableHead>
                   <TableHead>部門</TableHead>
+                  <TableHead className="text-center">工時</TableHead>
                   <TableHead className="text-center">
                     <div className="flex items-center justify-center gap-1">
                       <MessageCircle className="h-3.5 w-3.5" />
@@ -193,7 +199,7 @@ export default function LeaveBalance() {
                     </div>
                   </TableHead>
                   {policies.map((p) => (
-                    <TableHead key={p.id} className="text-center min-w-[100px]">
+                    <TableHead key={p.id} className="text-center min-w-[120px]">
                       {p.leave_type}
                     </TableHead>
                   ))}
@@ -204,6 +210,7 @@ export default function LeaveBalance() {
                   <TableRow key={emp.userId}>
                     <TableCell className="font-medium sticky left-0 bg-background">{emp.name}</TableCell>
                     <TableCell className="text-muted-foreground">{emp.department || "—"}</TableCell>
+                    <TableCell className="text-center text-muted-foreground">{emp.dailyWorkHours}h</TableCell>
                     <TableCell className="text-center">
                       {emp.lineBound ? (
                         <Badge variant="default" className="bg-emerald-500 text-xs">已綁定</Badge>
@@ -212,15 +219,17 @@ export default function LeaveBalance() {
                       )}
                     </TableCell>
                     {emp.balances.map((b, i) => (
-                      <TableCell key={i} className={`text-center ${getStatusColor(b.used, b.total)}`}>
-                        {b.used} / {b.total}
+                      <TableCell key={i} className={`text-center ${getStatusColor(b.usedHours, b.totalHours)}`}>
+                        <div className="text-sm">
+                          {formatHoursDisplay(b.usedHours, emp.dailyWorkHours)} / {formatHoursDisplay(b.totalHours, emp.dailyWorkHours)}
+                        </div>
                       </TableCell>
                     ))}
                   </TableRow>
                 ))}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3 + policies.length} className="text-center text-muted-foreground py-8">
+                    <TableCell colSpan={4 + policies.length} className="text-center text-muted-foreground py-8">
                       無符合條件的員工
                     </TableCell>
                   </TableRow>
