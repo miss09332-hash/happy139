@@ -5,15 +5,22 @@ import { Download, ChevronDown, ChevronUp, ExternalLink, Copy, Check } from "luc
 
 const CANVAS_W = 2500;
 const CANVAS_H = 1686;
-const HALF_W = CANVAS_W / 2;
 const HALF_H = CANVAS_H / 2;
+const HALF_W = CANVAS_W / 2;
+const THIRD_W = Math.floor(CANVAS_W / 3);
 
-const cells = [
-  { label: "申請休假", emoji: "📝", bg: "#3B82F6" },
-  { label: "查詢假期", emoji: "📊", bg: "#22C55E" },
-  { label: "當月休假", emoji: "📆", bg: "#8B5CF6" },
-  { label: "網頁版請假", emoji: "🌐", bg: "#F97316" },
+const topCells = [
+  { label: "申請休假", emoji: "📝", bg: "#3B82F6", x: 0, y: 0, w: HALF_W, h: HALF_H },
+  { label: "查詢假期", emoji: "📊", bg: "#22C55E", x: HALF_W, y: 0, w: HALF_W, h: HALF_H },
 ];
+
+const bottomCells = [
+  { label: "當月休假", emoji: "📆", bg: "#8B5CF6", x: 0, y: HALF_H, w: THIRD_W, h: HALF_H },
+  { label: "休假明細", emoji: "📋", bg: "#6366F1", x: THIRD_W, y: HALF_H, w: THIRD_W, h: HALF_H },
+  { label: "網頁版請假", emoji: "🌐", bg: "#F97316", x: THIRD_W * 2, y: HALF_H, w: CANVAS_W - THIRD_W * 2, h: HALF_H },
+];
+
+const allCells = [...topCells, ...bottomCells];
 
 const PUBLISHED_URL = "https://your-published-url.lovable.app";
 
@@ -38,11 +45,11 @@ const steps = [
   },
   {
     title: "五、選擇版型",
-    content: "選擇「大型」→ 2×2 四格版型（四個等大方格）。",
+    content: "選擇「大型」→ 上方 2 格 + 下方 3 格（共 5 個區塊）的版型。",
   },
   {
     title: "六、上傳圖片",
-    content: "點擊「上傳背景圖片」，選擇剛才下載的 line-rich-menu.png，確認圖片對齊四個區塊。",
+    content: "點擊「上傳背景圖片」，選擇剛才下載的 line-rich-menu.png，確認圖片對齊五個區塊。",
   },
   {
     title: "七、設定各區塊動作",
@@ -50,6 +57,7 @@ const steps = [
       { pos: "左上（申請休假）", type: "文字", value: "申請休假" },
       { pos: "右上（查詢假期）", type: "文字", value: "查詢假期" },
       { pos: "左下（當月休假）", type: "文字", value: "當月休假" },
+      { pos: "中下（休假明細）", type: "文字", value: "休假明細" },
       { pos: "右下（網頁版請假）", type: "連結", value: `${PUBLISHED_URL}/request-leave` },
     ],
   },
@@ -58,6 +66,28 @@ const steps = [
     content: "點擊「儲存」，確認狀態為「使用中」。",
   },
 ];
+
+function drawCell(ctx: CanvasRenderingContext2D, cell: typeof allCells[number]) {
+  const { x, y, w, h, bg, emoji, label } = cell;
+
+  ctx.fillStyle = bg;
+  ctx.fillRect(x, y, w, h);
+
+  const grad = ctx.createLinearGradient(x, y, x, y + h);
+  grad.addColorStop(0, "rgba(255,255,255,0.08)");
+  grad.addColorStop(1, "rgba(0,0,0,0.12)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(x, y, w, h);
+
+  ctx.font = "180px serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(emoji, x + w / 2, y + h / 2 - 80);
+
+  ctx.fillStyle = "#FFFFFF";
+  ctx.font = "bold 90px sans-serif";
+  ctx.fillText(label, x + w / 2, y + h / 2 + 100);
+}
 
 export default function RichMenuGenerator() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -69,39 +99,23 @@ export default function RichMenuGenerator() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
 
-    cells.forEach((cell, i) => {
-      const x = (i % 2) * HALF_W;
-      const y = Math.floor(i / 2) * HALF_H;
+    allCells.forEach((cell) => drawCell(ctx, cell));
 
-      ctx.fillStyle = cell.bg;
-      ctx.fillRect(x, y, HALF_W, HALF_H);
-
-      const grad = ctx.createLinearGradient(x, y, x, y + HALF_H);
-      grad.addColorStop(0, "rgba(255,255,255,0.08)");
-      grad.addColorStop(1, "rgba(0,0,0,0.12)");
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, y, HALF_W, HALF_H);
-
-      ctx.font = "180px serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(cell.emoji, x + HALF_W / 2, y + HALF_H / 2 - 80);
-
-      ctx.fillStyle = "#FFFFFF";
-      ctx.font = "bold 90px sans-serif";
-      ctx.fillText(cell.label, x + HALF_W / 2, y + HALF_H / 2 + 100);
-
-      ctx.strokeStyle = "rgba(255,255,255,0.3)";
-      ctx.lineWidth = 4;
-    });
-
-    ctx.beginPath();
-    ctx.moveTo(HALF_W, 0);
-    ctx.lineTo(HALF_W, CANVAS_H);
-    ctx.moveTo(0, HALF_H);
-    ctx.lineTo(CANVAS_W, HALF_H);
+    // Grid lines
     ctx.strokeStyle = "rgba(255,255,255,0.3)";
     ctx.lineWidth = 4;
+    ctx.beginPath();
+    // Vertical line top row
+    ctx.moveTo(HALF_W, 0);
+    ctx.lineTo(HALF_W, HALF_H);
+    // Horizontal middle
+    ctx.moveTo(0, HALF_H);
+    ctx.lineTo(CANVAS_W, HALF_H);
+    // Vertical lines bottom row
+    ctx.moveTo(THIRD_W, HALF_H);
+    ctx.lineTo(THIRD_W, CANVAS_H);
+    ctx.moveTo(THIRD_W * 2, HALF_H);
+    ctx.lineTo(THIRD_W * 2, CANVAS_H);
     ctx.stroke();
   }, []);
 
