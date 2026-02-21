@@ -35,6 +35,24 @@ async function clearState(supabase: any, lineUserId: string) {
 
 // ===== Helpers =====
 
+function calculateAnnualDays(hireDate: string | null, rules: { min_months: number; max_months: number | null; days: number }[]): number | null {
+  if (!hireDate || !rules?.length) return null;
+  const hire = new Date(hireDate);
+  const now = new Date();
+  const months = (now.getFullYear() - hire.getFullYear()) * 12 + (now.getMonth() - hire.getMonth());
+  if (months < 6) return 0;
+  const sorted = [...rules].sort((a, b) => a.min_months - b.min_months);
+  for (const rule of sorted) {
+    if (rule.max_months === null) {
+      return Math.min(rule.days + Math.floor((months - rule.min_months) / 12), 30);
+    }
+    if (months >= rule.min_months && months < rule.max_months) {
+      return rule.days;
+    }
+  }
+  return 0;
+}
+
 const COMMON_LEAVE_TYPES = ["特休", "病假", "事假"];
 
 function getLeaveTypeColor(type: string): string {
@@ -55,11 +73,13 @@ function replyMessage(replyToken: string, token: string, messages: object[]) {
 
 // ===== Flex Builders =====
 
-function buildLeaveTypeCarousel(policies: any[]): object {
+function buildLeaveTypeCarousel(policies: any[], annualDaysOverride?: number | null): object {
   const commonPolicies = policies.filter(p => COMMON_LEAVE_TYPES.includes(p.leave_type));
   const otherPolicies = policies.filter(p => !COMMON_LEAVE_TYPES.includes(p.leave_type));
 
-  const bubbles = commonPolicies.map((p) => ({
+  const bubbles = commonPolicies.map((p) => {
+    const displayDays = (p.leave_type === "特休" && annualDaysOverride != null) ? annualDaysOverride : p.default_days;
+    return {
     type: "bubble",
     size: "micro",
     header: {
@@ -72,7 +92,7 @@ function buildLeaveTypeCarousel(policies: any[]): object {
       type: "box", layout: "vertical",
       contents: [
         { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
-        { type: "text", text: `年度 ${p.default_days} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+        { type: "text", text: `年度 ${displayDays} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
       ],
       paddingAll: "lg",
     },
@@ -87,7 +107,8 @@ function buildLeaveTypeCarousel(policies: any[]): object {
       }],
       paddingAll: "sm",
     },
-  }));
+  };
+  });
 
   // Add "其他假別" card if there are other types
   if (otherPolicies.length > 0) {
@@ -128,9 +149,11 @@ function buildLeaveTypeCarousel(policies: any[]): object {
   };
 }
 
-function buildOtherLeaveTypeCarousel(policies: any[]): object {
+function buildOtherLeaveTypeCarousel(policies: any[], annualDaysOverride?: number | null): object {
   const otherPolicies = policies.filter(p => !COMMON_LEAVE_TYPES.includes(p.leave_type));
-  const bubbles = otherPolicies.map((p) => ({
+  const bubbles = otherPolicies.map((p) => {
+    const displayDays = (p.leave_type === "特休" && annualDaysOverride != null) ? annualDaysOverride : p.default_days;
+    return {
     type: "bubble",
     size: "micro",
     header: {
@@ -143,7 +166,7 @@ function buildOtherLeaveTypeCarousel(policies: any[]): object {
       type: "box", layout: "vertical",
       contents: [
         { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
-        { type: "text", text: `年度 ${p.default_days} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+        { type: "text", text: `年度 ${displayDays} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
       ],
       paddingAll: "lg",
     },
@@ -158,7 +181,8 @@ function buildOtherLeaveTypeCarousel(policies: any[]): object {
       }],
       paddingAll: "sm",
     },
-  }));
+  };
+  });
   return {
     type: "flex", altText: "其他假別",
     contents: { type: "carousel", contents: bubbles.slice(0, 10) },
@@ -723,16 +747,16 @@ serve(async (req) => {
 
         // Show other leave types
         if (action === "show_other_types") {
-          const { data: policies } = await supabase
-            .from("leave_policies")
-            .select("*")
-            .eq("is_active", true)
-            .order("leave_type");
+          const [{ data: policies }, { data: annualRules }] = await Promise.all([
+            supabase.from("leave_policies").select("*").eq("is_active", true).order("leave_type"),
+            supabase.from("annual_leave_rules").select("min_months, max_months, days").order("min_months"),
+          ]);
           if (!policies?.length) {
             await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("⚠️ 目前無其他假別。")]);
             continue;
           }
-          await replyMessage(replyToken, LINE_TOKEN, [buildOtherLeaveTypeCarousel(policies)]);
+          const annualDays = calculateAnnualDays(profile.hire_date, annualRules ?? []);
+          await replyMessage(replyToken, LINE_TOKEN, [buildOtherLeaveTypeCarousel(policies, annualDays)]);
           continue;
         }
 
@@ -869,16 +893,16 @@ serve(async (req) => {
 
         // --- Command dispatch ---
         if (text.includes("申請休假")) {
-          const { data: policies } = await supabase
-            .from("leave_policies")
-            .select("*")
-            .eq("is_active", true)
-            .order("leave_type");
+          const [{ data: policies }, { data: annualRules }] = await Promise.all([
+            supabase.from("leave_policies").select("*").eq("is_active", true).order("leave_type"),
+            supabase.from("annual_leave_rules").select("min_months, max_months, days").order("min_months"),
+          ]);
           if (!policies?.length) {
             await replyMessage(replyToken, LINE_TOKEN, [buildTextMessage("⚠️ 目前無可用假別，請聯繫管理員。")]);
             continue;
           }
-          await replyMessage(replyToken, LINE_TOKEN, [buildLeaveTypeCarousel(policies)]);
+          const annualDays = calculateAnnualDays(profile.hire_date, annualRules ?? []);
+          await replyMessage(replyToken, LINE_TOKEN, [buildLeaveTypeCarousel(policies, annualDays)]);
           continue;
         }
 
@@ -910,27 +934,7 @@ serve(async (req) => {
             usedMap.set(l.leave_type, (usedMap.get(l.leave_type) ?? 0) + days);
           }
 
-          let dynamicAnnualDays: number | null = null;
-          if (profile.hire_date && annualRules?.length) {
-            const hireDate = new Date(profile.hire_date);
-            const now = new Date();
-            const monthsOfService = (now.getFullYear() - hireDate.getFullYear()) * 12 + (now.getMonth() - hireDate.getMonth());
-            if (monthsOfService >= 6) {
-              for (const rule of annualRules) {
-                if (rule.max_months === null) {
-                  const extraYears = Math.floor((monthsOfService - rule.min_months) / 12);
-                  dynamicAnnualDays = Math.min(rule.days + extraYears, 30);
-                  break;
-                }
-                if (monthsOfService >= rule.min_months && monthsOfService < rule.max_months) {
-                  dynamicAnnualDays = rule.days;
-                  break;
-                }
-              }
-            } else {
-              dynamicAnnualDays = 0;
-            }
-          }
+          const dynamicAnnualDays = calculateAnnualDays(profile.hire_date, annualRules ?? []);
 
           const balances = (policies ?? []).map((p: any) => ({
             type: p.leave_type,
