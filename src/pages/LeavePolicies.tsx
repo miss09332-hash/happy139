@@ -9,7 +9,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Pencil, Palmtree, Bell, ArrowUp, ArrowDown } from "lucide-react";
+import { Plus, Pencil, Palmtree, Bell, GripVertical } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  rectSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface LeavePolicy {
   id: string;
@@ -25,12 +42,89 @@ interface LeavePolicy {
 
 const CATEGORIES = ["常用", "特殊", "其他"];
 
+const leaveTypeColors: Record<string, string> = {
+  "特休": "bg-blue-500", "病假": "bg-red-500", "事假": "bg-amber-500",
+  "婚假": "bg-violet-500", "產假": "bg-cyan-500", "喪假": "bg-gray-500",
+};
+
+function SortablePolicyCard({
+  policy,
+  onEdit,
+  onToggleActive,
+}: {
+  policy: LeavePolicy;
+  onEdit: (p: LeavePolicy) => void;
+  onToggleActive: (id: string, is_active: boolean) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: policy.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : undefined,
+  };
+
+  return (
+    <Card
+      ref={setNodeRef}
+      style={style}
+      className={`transition-opacity ${!policy.is_active ? "opacity-50" : ""}`}
+    >
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              {...attributes}
+              {...listeners}
+              className="cursor-grab active:cursor-grabbing touch-none text-muted-foreground hover:text-foreground"
+            >
+              <GripVertical className="h-4 w-4" />
+            </button>
+            <span className={`inline-block w-3 h-3 rounded-full ${leaveTypeColors[policy.leave_type] ?? "bg-muted-foreground"}`} />
+            <CardTitle className="text-lg">{policy.leave_type}</CardTitle>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" onClick={() => onEdit(policy)}>
+              <Pencil className="h-4 w-4" />
+            </Button>
+            <Switch
+              checked={policy.is_active}
+              onCheckedChange={(val) => onToggleActive(policy.id, val)}
+            />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="text-3xl font-bold text-foreground">{policy.default_days} <span className="text-sm font-normal text-muted-foreground">天/年</span></div>
+        <p className="text-sm text-muted-foreground mt-1">{policy.description || "—"}</p>
+        {policy.reminder_enabled && (
+          <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+            <Bell className="h-3.5 w-3.5" /> 已休 {policy.reminder_threshold_days} 天時提醒
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function LeavePolicies() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<LeavePolicy | null>(null);
   const [form, setForm] = useState({ leave_type: "", default_days: 0, description: "", reminder_threshold_days: 0, reminder_enabled: false, category: "常用", sort_order: 0 });
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const { data: policies = [], isLoading } = useQuery({
     queryKey: ["leave-policies"],
@@ -73,12 +167,12 @@ export default function LeavePolicies() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["leave-policies"] }),
   });
 
-  const swapOrder = useMutation({
-    mutationFn: async ({ a, b }: { a: LeavePolicy; b: LeavePolicy }) => {
-      const { error: e1 } = await supabase.from("leave_policies").update({ sort_order: b.sort_order }).eq("id", a.id);
-      if (e1) throw e1;
-      const { error: e2 } = await supabase.from("leave_policies").update({ sort_order: a.sort_order }).eq("id", b.id);
-      if (e2) throw e2;
+  const batchUpdateOrder = useMutation({
+    mutationFn: async (items: { id: string; sort_order: number }[]) => {
+      for (const item of items) {
+        const { error } = await supabase.from("leave_policies").update({ sort_order: item.sort_order }).eq("id", item.id);
+        if (error) throw error;
+      }
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["leave-policies"] }),
   });
@@ -100,11 +194,6 @@ export default function LeavePolicies() {
     upsert.mutate({ id: editing?.id, ...form });
   };
 
-  const leaveTypeColors: Record<string, string> = {
-    "特休": "bg-blue-500", "病假": "bg-red-500", "事假": "bg-amber-500",
-    "婚假": "bg-violet-500", "產假": "bg-cyan-500", "喪假": "bg-gray-500",
-  };
-
   // Group policies by category
   const grouped = policies.reduce<Record<string, LeavePolicy[]>>((acc, p) => {
     const cat = p.category || "常用";
@@ -113,14 +202,20 @@ export default function LeavePolicies() {
     return acc;
   }, {});
 
-  const handleMoveUp = (catPolicies: LeavePolicy[], index: number) => {
-    if (index === 0) return;
-    swapOrder.mutate({ a: catPolicies[index], b: catPolicies[index - 1] });
-  };
+  const handleDragEnd = (category: string) => (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-  const handleMoveDown = (catPolicies: LeavePolicy[], index: number) => {
-    if (index >= catPolicies.length - 1) return;
-    swapOrder.mutate({ a: catPolicies[index], b: catPolicies[index + 1] });
+    const catPolicies = grouped[category];
+    if (!catPolicies) return;
+
+    const oldIndex = catPolicies.findIndex((p) => p.id === active.id);
+    const newIndex = catPolicies.findIndex((p) => p.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(catPolicies, oldIndex, newIndex);
+    const updates = reordered.map((p, i) => ({ id: p.id, sort_order: i }));
+    batchUpdateOrder.mutate(updates);
   };
 
   return (
@@ -226,44 +321,24 @@ export default function LeavePolicies() {
           {Object.entries(grouped).map(([category, catPolicies]) => (
             <div key={category}>
               <h2 className="text-lg font-semibold text-foreground mb-3 border-b pb-2">{category}</h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {catPolicies.map((p, idx) => (
-                  <Card key={p.id} className={`transition-opacity ${!p.is_active ? "opacity-50" : ""}`}>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-block w-3 h-3 rounded-full ${leaveTypeColors[p.leave_type] ?? "bg-muted-foreground"}`} />
-                          <CardTitle className="text-lg">{p.leave_type}</CardTitle>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleMoveUp(catPolicies, idx)} disabled={idx === 0}>
-                            <ArrowUp className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleMoveDown(catPolicies, idx)} disabled={idx >= catPolicies.length - 1}>
-                            <ArrowDown className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button variant="ghost" size="icon" onClick={() => openEdit(p)}>
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Switch
-                            checked={p.is_active}
-                            onCheckedChange={(val) => toggleActive.mutate({ id: p.id, is_active: val })}
-                          />
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-bold text-foreground">{p.default_days} <span className="text-sm font-normal text-muted-foreground">天/年</span></div>
-                      <p className="text-sm text-muted-foreground mt-1">{p.description || "—"}</p>
-                      {p.reminder_enabled && (
-                        <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-                          <Bell className="h-3.5 w-3.5" /> 已休 {p.reminder_threshold_days} 天時提醒
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd(category)}
+              >
+                <SortableContext items={catPolicies.map((p) => p.id)} strategy={rectSortingStrategy}>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {catPolicies.map((p) => (
+                      <SortablePolicyCard
+                        key={p.id}
+                        policy={p}
+                        onEdit={openEdit}
+                        onToggleActive={(id, val) => toggleActive.mutate({ id, is_active: val })}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
             </div>
           ))}
         </div>

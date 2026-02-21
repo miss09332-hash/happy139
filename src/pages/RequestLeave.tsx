@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ const timeOptions = generateTimeOptions(0, 23);
 export default function RequestLeave() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const [isFullDay, setIsFullDay] = useState(true);
   const [form, setForm] = useState({
     leaveType: "",
     startDate: "",
@@ -93,9 +95,14 @@ export default function RequestLeave() {
     onError: (err: any) => toast.error("刪除失敗", { description: err.message }),
   });
 
-  const calculatedHours = form.startDate && form.endDate && form.startTime && form.endTime
-    ? calculateLeaveHours(form.startDate, form.endDate, form.startTime, form.endTime, dailyWorkHours)
-    : 0;
+  const calculatedHours = (() => {
+    if (!form.startDate || !form.endDate) return 0;
+    if (isFullDay) {
+      const diffDays = Math.round((new Date(form.endDate).getTime() - new Date(form.startDate).getTime()) / 86400000) + 1;
+      return Math.max(0, diffDays * dailyWorkHours);
+    }
+    return calculateLeaveHours(form.startDate, form.endDate, form.startTime, form.endTime, dailyWorkHours);
+  })();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,19 +137,23 @@ export default function RequestLeave() {
         return;
       }
 
+      const submitStartTime = isFullDay ? "09:00" : form.startTime;
+      const submitEndTime = isFullDay ? "18:00" : form.endTime;
+
       const { error } = await supabase.from("leave_requests").insert({
         user_id: user!.id,
         leave_type: form.leaveType,
         start_date: form.startDate,
         end_date: form.endDate,
-        start_time: form.startTime,
-        end_time: form.endTime,
+        start_time: submitStartTime,
+        end_time: submitEndTime,
         hours: calculatedHours,
         reason: form.reason,
       });
       if (error) throw error;
       toast.success("休假申請已提交");
       setForm({ leaveType: "", startDate: "", endDate: "", startTime: "09:00", endTime: "18:00", reason: "" });
+      setIsFullDay(true);
       queryClient.invalidateQueries({ queryKey: ["my-leaves"] });
 
       // Notify admin via LINE
@@ -154,8 +165,8 @@ export default function RequestLeave() {
           leaveType: form.leaveType,
           startDate: form.startDate,
           endDate: form.endDate,
-          startTime: form.startTime,
-          endTime: form.endTime,
+          startTime: submitStartTime,
+          endTime: submitEndTime,
           hours: calculatedHours,
           reason: form.reason,
         },
@@ -208,34 +219,47 @@ export default function RequestLeave() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>開始時間</Label>
-                <Select value={form.startTime} onValueChange={(v) => setForm({ ...form, startTime: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timeOptions.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>結束時間</Label>
-                <Select value={form.endTime} onValueChange={(v) => setForm({ ...form, endTime: v })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timeOptions.map((t) => (
-                      <SelectItem key={t} value={t}>{t}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="flex items-center space-x-2">
+              <Checkbox
+                id="full-day"
+                checked={isFullDay}
+                onCheckedChange={(checked) => setIsFullDay(checked === true)}
+              />
+              <Label htmlFor="full-day" className="text-sm font-medium cursor-pointer">
+                整天請假
+              </Label>
             </div>
+
+            {!isFullDay && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>開始時間</Label>
+                  <Select value={form.startTime} onValueChange={(v) => setForm({ ...form, startTime: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timeOptions.map((t) => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>結束時間</Label>
+                  <Select value={form.endTime} onValueChange={(v) => setForm({ ...form, endTime: v })}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timeOptions.map((t) => (
+                        <SelectItem key={t} value={t}>{t}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
 
             {calculatedHours > 0 && (
               <div className="flex items-center gap-2 p-3 rounded-lg bg-primary/10 text-primary text-sm font-medium">
