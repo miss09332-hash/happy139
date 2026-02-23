@@ -62,7 +62,7 @@ function formatHoursDisplay(totalHours: number, dailyWorkHours: number = 8): str
   return `${days}天 ${remainingHours}h`;
 }
 
-const COMMON_LEAVE_TYPES = ["特休", "病假", "事假"];
+// Leave types are now fully driven by DB category + sort_order
 
 function getLeaveTypeColor(type: string): string {
   const colors: Record<string, string> = {
@@ -83,57 +83,59 @@ function replyMessage(replyToken: string, token: string, messages: object[]) {
 // ===== Flex Builders =====
 
 function buildLeaveTypeCarousel(policies: any[], annualDaysOverride?: number | null): object {
-  const commonPolicies = policies.filter(p => COMMON_LEAVE_TYPES.includes(p.leave_type));
-  const otherPolicies = policies.filter(p => !COMMON_LEAVE_TYPES.includes(p.leave_type));
+  // policies are already sorted by category + sort_order from DB
+  const MAX_CAROUSEL = 10;
+  const toShow = policies.slice(0, MAX_CAROUSEL);
+  const overflow = policies.slice(MAX_CAROUSEL);
 
-  const bubbles = commonPolicies.map((p) => {
+  const bubbles = toShow.map((p) => {
     const displayDays = (p.leave_type === "特休" && annualDaysOverride != null) ? annualDaysOverride : p.default_days;
     return {
-    type: "bubble",
-    size: "micro",
-    header: {
-      type: "box", layout: "vertical",
-      contents: [{ type: "text", text: p.leave_type, size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
-      backgroundColor: getLeaveTypeColor(p.leave_type),
-      paddingAll: "lg",
-    },
-    body: {
-      type: "box", layout: "vertical",
-      contents: [
-        { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
-        { type: "text", text: `年度 ${displayDays} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
-      ],
-      paddingAll: "lg",
-    },
-    footer: {
-      type: "box", layout: "vertical",
-      contents: [{
-        type: "button",
-        action: { type: "postback", label: "選擇", data: `action=select_leave&type=${p.leave_type}` },
-        style: "primary",
-        color: getLeaveTypeColor(p.leave_type),
-        height: "sm",
-      }],
-      paddingAll: "sm",
-    },
-  };
-  });
-
-  if (otherPolicies.length > 0) {
-    bubbles.push({
       type: "bubble",
       size: "micro",
       header: {
         type: "box", layout: "vertical",
-        contents: [{ type: "text", text: "其他假別", size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
+        contents: [{ type: "text", text: p.leave_type, size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
+        backgroundColor: getLeaveTypeColor(p.leave_type),
+        paddingAll: "lg",
+      },
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
+          { type: "text", text: `年度 ${displayDays} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical",
+        contents: [{
+          type: "button",
+          action: { type: "postback", label: "選擇", data: `action=select_leave&type=${p.leave_type}` },
+          style: "primary",
+          color: getLeaveTypeColor(p.leave_type),
+          height: "sm",
+        }],
+        paddingAll: "sm",
+      },
+    };
+  });
+
+  if (overflow.length > 0) {
+    // Replace last bubble with "more" card if we hit the limit
+    bubbles[MAX_CAROUSEL - 1] = {
+      type: "bubble",
+      size: "micro",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [{ type: "text", text: "更多假別", size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
         backgroundColor: "#9CA3AF",
         paddingAll: "lg",
       },
       body: {
         type: "box", layout: "vertical",
         contents: [
-          { type: "text", text: `包含${otherPolicies.map(p => p.leave_type).join("、")}`, size: "xs", color: "#888888", wrap: true },
-          { type: "text", text: `共 ${otherPolicies.length} 種`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+          { type: "text", text: `還有${overflow.length + 1}種假別`, size: "xs", color: "#888888", wrap: true },
         ],
         paddingAll: "lg",
       },
@@ -148,51 +150,51 @@ function buildLeaveTypeCarousel(policies: any[], annualDaysOverride?: number | n
         }],
         paddingAll: "sm",
       },
-    });
+    };
   }
 
   return {
     type: "flex", altText: "請選擇假別",
-    contents: { type: "carousel", contents: bubbles.slice(0, 10) },
+    contents: { type: "carousel", contents: bubbles },
   };
 }
 
 function buildOtherLeaveTypeCarousel(policies: any[], annualDaysOverride?: number | null): object {
-  const otherPolicies = policies.filter(p => !COMMON_LEAVE_TYPES.includes(p.leave_type));
-  const bubbles = otherPolicies.map((p) => {
+  // Show all policies (already sorted by category + sort_order)
+  const bubbles = policies.map((p) => {
     const displayDays = (p.leave_type === "特休" && annualDaysOverride != null) ? annualDaysOverride : p.default_days;
     return {
-    type: "bubble",
-    size: "micro",
-    header: {
-      type: "box", layout: "vertical",
-      contents: [{ type: "text", text: p.leave_type, size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
-      backgroundColor: getLeaveTypeColor(p.leave_type),
-      paddingAll: "lg",
-    },
-    body: {
-      type: "box", layout: "vertical",
-      contents: [
-        { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
-        { type: "text", text: `年度 ${displayDays} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
-      ],
-      paddingAll: "lg",
-    },
-    footer: {
-      type: "box", layout: "vertical",
-      contents: [{
-        type: "button",
-        action: { type: "postback", label: "選擇", data: `action=select_leave&type=${p.leave_type}` },
-        style: "primary",
-        color: getLeaveTypeColor(p.leave_type),
-        height: "sm",
-      }],
-      paddingAll: "sm",
-    },
-  };
+      type: "bubble",
+      size: "micro",
+      header: {
+        type: "box", layout: "vertical",
+        contents: [{ type: "text", text: p.leave_type, size: "lg", color: "#FFFFFF", weight: "bold", align: "center" }],
+        backgroundColor: getLeaveTypeColor(p.leave_type),
+        paddingAll: "lg",
+      },
+      body: {
+        type: "box", layout: "vertical",
+        contents: [
+          { type: "text", text: p.description || "　", size: "xs", color: "#888888", wrap: true },
+          { type: "text", text: `年度 ${displayDays} 天`, size: "sm", color: "#333333", weight: "bold", margin: "md" },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box", layout: "vertical",
+        contents: [{
+          type: "button",
+          action: { type: "postback", label: "選擇", data: `action=select_leave&type=${p.leave_type}` },
+          style: "primary",
+          color: getLeaveTypeColor(p.leave_type),
+          height: "sm",
+        }],
+        paddingAll: "sm",
+      },
+    };
   });
   return {
-    type: "flex", altText: "其他假別",
+    type: "flex", altText: "全部假別",
     contents: { type: "carousel", contents: bubbles.slice(0, 10) },
   };
 }
@@ -908,7 +910,9 @@ async function queryBalance(supabase: any, profile: any, showAll: boolean) {
   const { data: policies } = await supabase
     .from("leave_policies")
     .select("*")
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .order("category")
+    .order("sort_order");
 
   const { data: annualRules } = await supabase
     .from("annual_leave_rules")
@@ -1003,7 +1007,7 @@ serve(async (req) => {
         // Show other leave types
         if (action === "show_other_types") {
           const [{ data: policies }, { data: annualRules }] = await Promise.all([
-            supabase.from("leave_policies").select("*").eq("is_active", true).order("leave_type"),
+            supabase.from("leave_policies").select("*").eq("is_active", true).order("category").order("sort_order"),
             supabase.from("annual_leave_rules").select("min_months, max_months, days").order("min_months"),
           ]);
           if (!policies?.length) {
@@ -1227,7 +1231,7 @@ serve(async (req) => {
         // --- Command dispatch ---
         if (text.includes("申請休假")) {
           const [{ data: policies }, { data: annualRules }] = await Promise.all([
-            supabase.from("leave_policies").select("*").eq("is_active", true).order("leave_type"),
+            supabase.from("leave_policies").select("*").eq("is_active", true).order("category").order("sort_order"),
             supabase.from("annual_leave_rules").select("min_months, max_months, days").order("min_months"),
           ]);
           if (!policies?.length) {
