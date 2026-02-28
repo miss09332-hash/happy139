@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Search, Check, X, Send, Pencil, Save, Trash2, Clock } from "lucide-react";
+import { Search, Check, X, Send, Pencil, Save, Trash2, Clock, Download } from "lucide-react";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -35,6 +35,7 @@ export default function Admin() {
   const [editStartTime, setEditStartTime] = useState("");
   const [editEndTime, setEditEndTime] = useState("");
   const [editHours, setEditHours] = useState<number | "">("");
+  const [activeTab, setActiveTab] = useState("pending");
   const queryClient = useQueryClient();
 
   const { data: requests = [] } = useQuery({
@@ -203,6 +204,38 @@ export default function Admin() {
     return filtered.filter((r) => r.profile_name.includes(search) || r.profile_department.includes(search));
   };
 
+  const exportCSV = () => {
+    const data = filterByStatus(activeTab);
+    if (data.length === 0) {
+      toast.error("目前無資料可匯出");
+      return;
+    }
+    const headers = ["員工姓名", "部門", "假別", "開始日期", "結束日期", "開始時間", "結束時間", "時數", "狀態", "原因", "申請時間"];
+    const rows = data.map((r) => [
+      r.profile_name,
+      r.profile_department,
+      r.leave_type,
+      r.start_date,
+      r.end_date,
+      r.start_time || "",
+      r.end_time || "",
+      r.hours != null ? String(r.hours) : "",
+      statusLabels[r.status] ?? r.status,
+      r.reason,
+      new Date(r.created_at).toLocaleString("zh-TW", { timeZone: "Asia/Taipei" }),
+    ]);
+    const csvContent = [headers, ...rows].map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const bom = "\uFEFF";
+    const blob = new Blob([bom + csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `休假紀錄_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success("CSV 已匯出");
+  };
+
   return (
     <div className="min-h-screen p-6 lg:p-8">
       <div className="mb-8 flex items-center justify-between">
@@ -210,17 +243,22 @@ export default function Admin() {
           <h1 className="text-2xl font-bold tracking-tight">管理後台</h1>
           <p className="text-muted-foreground mt-1">審核與管理休假申請</p>
         </div>
-        <Button variant="outline" className="gap-2" onClick={async () => {
-          try {
-            toast.loading("正在發送每日提醒...", { id: "line-daily" });
-            await sendDailySummary();
-            toast.success("每日休假提醒已發送", { id: "line-daily" });
-          } catch (err: any) {
-            toast.error("發送失敗", { id: "line-daily", description: err.message });
-          }
-        }}>
-          <Send className="h-4 w-4" />發送每日提醒
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" className="gap-2" onClick={exportCSV}>
+            <Download className="h-4 w-4" />匯出 CSV
+          </Button>
+          <Button variant="outline" className="gap-2" onClick={async () => {
+            try {
+              toast.loading("正在發送每日提醒...", { id: "line-daily" });
+              await sendDailySummary();
+              toast.success("每日休假提醒已發送", { id: "line-daily" });
+            } catch (err: any) {
+              toast.error("發送失敗", { id: "line-daily", description: err.message });
+            }
+          }}>
+            <Send className="h-4 w-4" />發送每日提醒
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
@@ -235,7 +273,7 @@ export default function Admin() {
             </div>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="pending">
+            <Tabs defaultValue="pending" onValueChange={setActiveTab}>
               <TabsList className="mb-4">
                 <TabsTrigger value="pending">待審核</TabsTrigger>
                 <TabsTrigger value="approved">已核准</TabsTrigger>
