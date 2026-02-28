@@ -1,33 +1,40 @@
 
 
-# 修復 LINE 兩個問題
+# 兩項功能改進
 
-## 問題分析
+## 1. LINE 時間選擇改用 datetimepicker（原生時間下拉）
 
-### 問題 1：LINE 不能選擇時數
-Edge function 的時間選擇流程程式碼邏輯正確（整天/選擇時間 → Quick Reply 時間按鈕），但可能需要重新部署 edge function 才能生效。會確認部署狀態。
+LINE Messaging API 支援 `datetimepicker` action 的 `mode: "time"`，會在手機上顯示原生的時間滾輪選擇器，比 Quick Reply 按鈕更直覺。
 
-### 問題 2：拖拉排序不影響 LINE 顯示順序
-找到兩個 bug：
+### 修改 `supabase/functions/line-webhook/index.ts`
 
-1. **查詢排序錯誤**：LINE webhook 查詢假別時使用 `.order("leave_type")`（按名稱字母排序），而非 `.order("category").order("sort_order")`（按拖拉排序）
-2. **假別分類硬編碼**：`COMMON_LEAVE_TYPES = ["特休", "病假", "事假"]` 把假別分為「常用」和「其他」兩組顯示在 carousel 中，完全忽略資料庫的分類和排序。這導致喪假永遠出現在「其他假別」卡片裡，無法透過拖拉改變位置。
+- **移除** `buildTimeQuickReply` 函式
+- **新增** `buildTimePicker` 函式，使用 Flex Message + datetimepicker button：
+  - 選擇開始時間：`action.type = "datetimepicker"`, `mode = "time"`, `data = "action=set_start_time&type=...&start=...&end=..."`
+  - 選擇結束時間：同理，`data = "action=set_end_time&..."`
+- **修改** `pick_time` postback handler（line 1081）：改為回覆 `buildTimePicker` 而非 `buildTimeQuickReply`
+- **修改** `set_start_time` handler（line 1093）：從 `event.postback.params.time` 取得時間（而非 URL params 的 `time`）
+- **修改** `set_end_time` handler（line 1106）：同上，從 `event.postback.params.time` 取得結束時間
 
-## 修復方案
+### datetimepicker time mode 回傳格式
+`event.postback.params.time` 回傳 `"HH:mm"` 格式字串
 
-### 修改檔案：`supabase/functions/line-webhook/index.ts`
+## 2. 管理後台新增 CSV 匯出
 
-**1. 修正所有查詢的排序**
-- 「申請休假」查詢改為 `.order("category").order("sort_order")`
-- 「其他假別」查詢改為 `.order("category").order("sort_order")`
-- 「餘額查詢」查詢加入 `.order("category").order("sort_order")`
+### 修改 `src/pages/Admin.tsx`
 
-**2. 移除硬編碼的 COMMON_LEAVE_TYPES**
-- 不再用固定的假別名稱分組
-- 改用資料庫的 `category` 欄位分組（如「常用」、「特殊」、「其他」）
-- Carousel 按 sort_order 順序顯示所有假別，不再強制分兩組
-- 如果假別數量超過 10 個（LINE carousel 上限），後面的放入「更多假別」卡片
+- 在標題列（發送每日提醒按鈕旁邊）新增「匯出 CSV」按鈕
+- 匯出邏輯：
+  - 將當前 tab 篩選後的 `requests` 資料轉為 CSV
+  - 欄位：員工姓名、部門、假別、開始日期、結束日期、開始時間、結束時間、時數、狀態、原因、申請時間
+  - 使用 BOM + UTF-8 編碼（確保中文在 Excel 正常顯示）
+  - 用 `Blob` + `URL.createObjectURL` + `<a>` 觸發下載
+  - 檔名含日期：`休假紀錄_2026-02-28.csv`
 
-**3. 確認重新部署**
-- 修改完成後自動部署 edge function
+### 修改的檔案
+
+| 檔案 | 變更 |
+|---|---|
+| `supabase/functions/line-webhook/index.ts` | 移除 Quick Reply 時間選擇，改用 datetimepicker time mode |
+| `src/pages/Admin.tsx` | 新增 CSV 匯出按鈕和下載邏輯 |
 
