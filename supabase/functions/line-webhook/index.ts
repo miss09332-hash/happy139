@@ -348,21 +348,41 @@ function buildFullDayPrompt(leaveType: string, startDate: string, endDate: strin
   };
 }
 
-function buildTimeQuickReply(prompt: string, actionPrefix: string, leaveType: string, startDate: string, endDate: string): object {
-  // LINE Quick Reply max 13 items - use 1-hour increments
-  const times = ["09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"];
+function buildTimePicker(prompt: string, actionPrefix: string, leaveType: string, startDate: string, endDate: string): object {
   return {
-    type: "text",
-    text: prompt,
-    quickReply: {
-      items: times.map(t => ({
-        type: "action",
-        action: {
-          type: "postback",
-          label: t,
-          data: `action=${actionPrefix}&type=${leaveType}&start=${startDate}&end=${endDate}&time=${t}`,
-        },
-      })),
+    type: "flex",
+    altText: prompt,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          { type: "text", text: prompt, size: "md", weight: "bold", wrap: true },
+        ],
+        paddingAll: "lg",
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            action: {
+              type: "datetimepicker",
+              label: "選擇時間",
+              data: `action=${actionPrefix}&type=${leaveType}&start=${startDate}&end=${endDate}`,
+              mode: "time",
+              initial: actionPrefix === "set_start_time" ? "09:00" : "18:00",
+              min: "00:00",
+              max: "23:59",
+            },
+          },
+        ],
+        paddingAll: "md",
+      },
     },
   };
 }
@@ -1084,7 +1104,7 @@ serve(async (req) => {
           const endDate = params.get("end")!;
           await setState(supabase, userId, "await_start_time", { leaveType, startDate, endDate });
           await replyMessage(replyToken, LINE_TOKEN, [
-            buildTimeQuickReply("請選擇開始時間：", "set_start_time", leaveType, startDate, endDate),
+            buildTimePicker("請選擇開始時間", "set_start_time", leaveType, startDate, endDate),
           ]);
           continue;
         }
@@ -1094,10 +1114,10 @@ serve(async (req) => {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
           const endDate = params.get("end")!;
-          const time = params.get("time")!;
+          const time = event.postback?.params?.time || params.get("time")!;
           await setState(supabase, userId, "await_end_time", { leaveType, startDate, endDate, startTime: time });
           await replyMessage(replyToken, LINE_TOKEN, [
-            buildTimeQuickReply(`開始時間：${time}\n請選擇結束時間：`, "set_end_time", leaveType, startDate, endDate),
+            buildTimePicker(`開始時間：${time}\n請選擇結束時間`, "set_end_time", leaveType, startDate, endDate),
           ]);
           continue;
         }
@@ -1107,7 +1127,7 @@ serve(async (req) => {
           const leaveType = params.get("type")!;
           const startDate = params.get("start")!;
           const endDate = params.get("end")!;
-          const endTime = params.get("time")!;
+          const endTime = event.postback?.params?.time || params.get("time")!;
           const state = await getState(supabase, userId);
           const startTime = state?.data?.startTime || "09:00";
           const dailyWorkHours = profile.daily_work_hours || 8;
