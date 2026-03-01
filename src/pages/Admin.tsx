@@ -3,7 +3,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Search, Check, X, Send, Pencil, Save, Trash2, Clock, Download } from "lucide-react";
+import { Search, Check, X, Send, Pencil, Save, Trash2, Clock, Download, CalendarIcon } from "lucide-react";
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -36,13 +40,14 @@ export default function Admin() {
   const [editEndTime, setEditEndTime] = useState("");
   const [editHours, setEditHours] = useState<number | "">("");
   const [activeTab, setActiveTab] = useState("pending");
+  const [dateFrom, setDateFrom] = useState<Date | undefined>();
+  const [dateTo, setDateTo] = useState<Date | undefined>();
   const queryClient = useQueryClient();
 
   const { data: requests = [] } = useQuery({
     queryKey: ["admin-leaves"],
     queryFn: () => fetchLeavesWithProfiles(),
   });
-
   const updateMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) => {
       const { error } = await supabase.from("leave_requests").update({ status }).eq("id", id);
@@ -200,8 +205,22 @@ export default function Admin() {
   };
 
   const filterByStatus = (status: string) => {
-    const filtered = status === "all" ? requests : requests.filter((r) => r.status === status);
-    return filtered.filter((r) => r.profile_name.includes(search) || r.profile_department.includes(search));
+    let filtered = status === "all" ? requests : requests.filter((r) => r.status === status);
+    filtered = filtered.filter((r) => r.profile_name.includes(search) || r.profile_department.includes(search));
+    if (dateFrom) {
+      const fromStr = format(dateFrom, "yyyy-MM-dd");
+      filtered = filtered.filter((r) => r.start_date >= fromStr);
+    }
+    if (dateTo) {
+      const toStr = format(dateTo, "yyyy-MM-dd");
+      filtered = filtered.filter((r) => r.start_date <= toStr);
+    }
+    return filtered;
+  };
+
+  const clearDateFilter = () => {
+    setDateFrom(undefined);
+    setDateTo(undefined);
   };
 
   const exportCSV = () => {
@@ -259,6 +278,37 @@ export default function Admin() {
             <Send className="h-4 w-4" />發送每日提醒
           </Button>
         </div>
+      </div>
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <span className="text-sm font-medium text-muted-foreground">日期篩選：</span>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" className={cn("w-[160px] justify-start text-left font-normal", !dateFrom && "text-muted-foreground")}>
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {dateFrom ? format(dateFrom, "yyyy-MM-dd") : "開始日期"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar mode="single" selected={dateFrom} onSelect={setDateFrom} initialFocus className="p-3 pointer-events-auto" />
+          </PopoverContent>
+        </Popover>
+        <span className="text-muted-foreground">～</span>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="outline" className={cn("w-[160px] justify-start text-left font-normal", !dateTo && "text-muted-foreground")}>
+              <CalendarIcon className="mr-2 h-4 w-4" />
+              {dateTo ? format(dateTo, "yyyy-MM-dd") : "結束日期"}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="start">
+            <Calendar mode="single" selected={dateTo} onSelect={setDateTo} initialFocus className="p-3 pointer-events-auto" />
+          </PopoverContent>
+        </Popover>
+        {(dateFrom || dateTo) && (
+          <Button variant="ghost" size="sm" onClick={clearDateFilter} className="text-muted-foreground">
+            清除篩選
+          </Button>
+        )}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_400px]">
